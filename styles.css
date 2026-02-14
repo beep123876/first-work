@@ -83,5 +83,5 @@ button.danger { background: #fee8e8; color: var(--danger); }
 .stat p { margin: 0; font-size: 1.05rem; font-weight: 700; }
 
 table { width: 100%; border-collapse: collapse; }
-th, td { border-bottom: 1px solid var(--border); text-align: left; padding: 10px; vertical-align: top; }
+th, td { border-bottom: 1px solid var(--border); text-align: center; padding: 10px; vertical-align: middle; }
 .empty { text-align: center; color: var(--muted); }

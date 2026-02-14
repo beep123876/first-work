@@ -1,4 +1,4 @@
-const STORAGE_KEY = "attendanceDashboardData_v5";
+const STORAGE_KEY = "attendanceDashboardData_v6";
 const DEFAULT_DRIVE_XLSX_URL = "https://docs.google.com/spreadsheets/d/1grIcwPHx4XanTASz9UGmANC8L6bNAIMdH5D2h6wP73Q/export?format=xlsx";
 const HOURS_PER_DAY = 8;
 
@@ -17,13 +17,14 @@ const empNoEl = document.getElementById("empNo");
 const overtimeEl = document.getElementById("overtime");
 const sickLeaveEl = document.getElementById("sickLeave");
 const earlyLeaveEl = document.getElementById("earlyLeave");
-const domesticTripEl = document.getElementById("domesticTrip");
 const internationalTripEl = document.getElementById("internationalTrip");
 const localTripEl = document.getElementById("localTrip");
 const outsideTripEl = document.getElementById("outsideTrip");
 const maternityLeaveEl = document.getElementById("maternityLeave");
 const pregnancyCheckupEl = document.getElementById("pregnancyCheckup");
 const dayOffEl = document.getElementById("dayOff");
+const longServiceLeaveEl = document.getElementById("longServiceLeave");
+const pregnancyShorterEl = document.getElementById("pregnancyShorter");
 const detailRows = document.getElementById("detailRows");
 
 function convertDriveUrl(url) {
@@ -108,14 +109,19 @@ function calcTripHours(fromLine, toLine) {
 
 function classifyLeaveType(typeRaw, durationHours) {
   const type = typeRaw.replace(/\s+/g, "");
+
   if (type.includes("병가")) return { category: "병가", subType: typeRaw };
   if (type.includes("산전후휴가")) return { category: "산전후휴가", subType: typeRaw };
   if (type.includes("임산부정기검진")) return { category: "임산부정기검진", subType: typeRaw };
+  if (type.includes("임신기단축")) return { category: "임신기단축", subType: "임신기 단축" };
+  if (type.includes("근속휴가")) return { category: "근속휴가", subType: "근속휴가" };
   if (type.includes("조퇴")) return { category: "조퇴", subType: typeRaw };
-  if (type.includes("대체휴무") || type.includes("휴가") || type.includes("휴무")) {
+
+  if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
     const subType = durationHours > 0 ? `휴무(${formatHoursLabel(durationHours)})` : "휴무";
     return { category: "휴무", subType, isDayOff: true };
   }
+
   return { category: "기타", subType: typeRaw };
 }
 
@@ -141,15 +147,28 @@ function parseLeaveEntries(cellText) {
     const typeMatch = line.match(/^종별\s*[:：]\s*(.+)$/);
     if (typeMatch) {
       if (current) entries.push(current);
-      current = { typeRaw: typeMatch[1].trim(), durationHours: 0 };
+      current = { typeRaw: typeMatch[1].trim(), durationHours: 0, reason: "", raw: [line] };
       return;
     }
 
+    if (!current) return;
+    current.raw.push(line);
+
     const durationMatch = line.match(/^일수\/시간\s*[:：]\s*(.+)$/);
-    if (durationMatch && current) current.durationHours = parseDurationFromText(durationMatch[1]);
+    if (durationMatch) current.durationHours = parseDurationFromText(durationMatch[1]);
+
+    const reasonMatch = line.match(/^사유\s*[:：]\s*(.+)$/);
+    if (reasonMatch) current.reason = reasonMatch[1].trim();
   });
 
   if (current) entries.push(current);
+
+  entries.forEach((entry) => {
+    if (entry.durationHours <= 0) {
+      entry.durationHours = parseDurationFromText(entry.raw.join("\n"));
+    }
+  });
+
   return entries;
 }
 
@@ -165,13 +184,15 @@ function parseTripEntries(cellText) {
     const typeMatch = line.match(/^종별\s*[:：]\s*(.+)$/);
     if (typeMatch) {
       if (current) entries.push(current);
-      current = { typeRaw: typeMatch[1].trim(), fromLine: "", toLine: "" };
+      current = { typeRaw: typeMatch[1].trim(), fromLine: "", toLine: "", reason: "" };
       return;
     }
 
     if (!current) return;
     if (/^부터\s*[:：]\s*/.test(line)) current.fromLine = line;
     if (/^까지\s*[:：]\s*/.test(line)) current.toLine = line;
+    const reasonMatch = line.match(/^사유\s*[:：]\s*(.+)$/);
+    if (reasonMatch) current.reason = reasonMatch[1].trim();
   });
 
   if (current) entries.push(current);
@@ -189,12 +210,12 @@ function parseRow(row, sheetName) {
 
   const overtimeHours = parseOvertimeHours(row["시간외관리"] ?? row["시간외(시간)"] ?? row["시간외"]);
   if (overtimeHours > 0) {
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "시간외", subType: "시간외근무", overtimeHours, durationHours: 0, isDayOff: false });
+    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "시간외", subType: "시간외근무", detail: "시간외근무", overtimeHours, durationHours: 0, isDayOff: false });
   }
 
   const earlyLeaveHours = parseHourValue(row["조기퇴근"] ?? row["조퇴"]);
   if (earlyLeaveHours > 0) {
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "조퇴", subType: `조기퇴근(${formatHoursLabel(earlyLeaveHours)})`, overtimeHours: 0, durationHours: earlyLeaveHours, isDayOff: false });
+    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "조퇴", subType: `조기퇴근(${formatHoursLabel(earlyLeaveHours)})`, detail: "조기퇴근", overtimeHours: 0, durationHours: earlyLeaveHours, isDayOff: false });
   }
 
   const leaveEntries = parseLeaveEntries(row["휴가관리"] ?? row["근태유형"] ?? row["유형"]);
@@ -207,6 +228,7 @@ function parseRow(row, sheetName) {
       date: dateIso,
       category: c.category,
       subType: c.subType,
+      detail: entry.reason || c.subType,
       overtimeHours: 0,
       durationHours: entry.durationHours,
       isDayOff: Boolean(c.isDayOff),
@@ -218,7 +240,7 @@ function parseRow(row, sheetName) {
     const c = classifyTripType(entry.typeRaw);
     const tripHours = calcTripHours(entry.fromLine, entry.toLine);
     const subType = tripHours > 0 ? `${c.subType}(${formatHoursLabel(tripHours)})` : c.subType;
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: c.category, subType, overtimeHours: 0, durationHours: tripHours, isDayOff: false });
+    results.push({ month: sheetName, name, employeeId, date: dateIso, category: c.category, subType, detail: entry.reason || subType, overtimeHours: 0, durationHours: tripHours, isDayOff: false });
   });
 
   return results;
@@ -283,12 +305,13 @@ function summaryBase() {
     dayOffHours: 0,
     sickLeaveHours: 0,
     earlyLeaveHours: 0,
-    domesticTrip: 0,
-    internationalTrip: 0,
     localTrip: 0,
     outsideTrip: 0,
+    internationalTrip: 0,
     maternityLeaveHours: 0,
     pregnancyCheckupHours: 0,
+    longServiceLeaveHours: 0,
+    pregnancyShorterHours: 0,
   };
 }
 
@@ -312,17 +335,12 @@ function buildSummary(records) {
     if (r.category === "조퇴") summary.earlyLeaveHours += r.durationHours;
     if (r.category === "산전후휴가") summary.maternityLeaveHours += r.durationHours;
     if (r.category === "임산부정기검진") summary.pregnancyCheckupHours += r.durationHours;
+    if (r.category === "근속휴가") summary.longServiceLeaveHours += r.durationHours;
+    if (r.category === "임신기단축") summary.pregnancyShorterHours += r.durationHours;
 
+    if (r.subType.startsWith("관내출장")) summary.localTrip += 1;
+    if (r.subType.startsWith("관외출장")) summary.outsideTrip += 1;
     if (r.subType.startsWith("국외출장")) summary.internationalTrip += 1;
-    if (r.subType.startsWith("관내출장")) {
-      summary.localTrip += 1;
-      summary.domesticTrip += 1;
-    }
-    if (r.subType.startsWith("관외출장")) {
-      summary.outsideTrip += 1;
-      summary.domesticTrip += 1;
-    }
-    if (r.subType.startsWith("국내출장")) summary.domesticTrip += 1;
   });
   return summary;
 }
@@ -337,10 +355,20 @@ function renderDetails(records) {
     return;
   }
 
-  detailRows.innerHTML = records
-    .slice()
+  const grouped = new Map();
+  records.forEach((r) => {
+    const detail = r.detail || r.subType || "-";
+    const key = `${r.date}__${r.category}__${detail}`;
+    const hours = (r.overtimeHours || 0) + (r.durationHours || 0);
+    if (!grouped.has(key)) {
+      grouped.set(key, { date: r.date, category: r.category, detail, hours: 0 });
+    }
+    grouped.get(key).hours += hours;
+  });
+
+  detailRows.innerHTML = [...grouped.values()]
     .sort((a, b) => a.date.localeCompare(b.date))
-    .map((r) => `<tr><td>${r.date}</td><td>${r.category}</td><td>${r.subType}</td><td>${r.overtimeHours > 0 ? r.overtimeHours.toFixed(2) : "-"}</td></tr>`)
+    .map((r) => `<tr><td>${r.date}</td><td>${r.category}</td><td>${r.detail}</td><td>${r.hours.toFixed(2)}</td></tr>`)
     .join("");
 }
 
@@ -356,12 +384,13 @@ function updateDashboard() {
   dayOffEl.textContent = formatDays(summary.dayOffHours);
   sickLeaveEl.textContent = formatDays(summary.sickLeaveHours);
   earlyLeaveEl.textContent = formatDays(summary.earlyLeaveHours);
-  domesticTripEl.textContent = String(summary.domesticTrip);
-  internationalTripEl.textContent = String(summary.internationalTrip);
   localTripEl.textContent = String(summary.localTrip);
   outsideTripEl.textContent = String(summary.outsideTrip);
+  internationalTripEl.textContent = String(summary.internationalTrip);
   maternityLeaveEl.textContent = formatDays(summary.maternityLeaveHours);
   pregnancyCheckupEl.textContent = formatDays(summary.pregnancyCheckupHours);
+  longServiceLeaveEl.textContent = formatDays(summary.longServiceLeaveHours);
+  pregnancyShorterEl.textContent = summary.pregnancyShorterHours.toFixed(2);
 
   renderDetails(records);
 }
