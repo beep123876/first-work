@@ -25,6 +25,7 @@ const maternityLeaveEl = document.getElementById("maternityLeave");
 const pregnancyCheckupEl = document.getElementById("pregnancyCheckup");
 const dayOffEl = document.getElementById("dayOff");
 const longServiceLeaveEl = document.getElementById("longServiceLeave");
+const rewardLeaveEl = document.getElementById("rewardLeave");
 const pregnancyShorterEl = document.getElementById("pregnancyShorter");
 const detailRows = document.getElementById("detailRows");
 
@@ -116,6 +117,7 @@ function classifyLeaveType(typeRaw, durationHours) {
   if (type.includes("임산부정기검진")) return { category: "임산부정기검진", subType: typeRaw };
   if (type.includes("임신기단축")) return { category: "임신기단축", subType: "임신기 단축" };
   if (type.includes("근속휴가")) return { category: "근속휴가", subType: "근속휴가" };
+  if (type.includes("법인발전유공휴가") || type.includes("포상휴가") || type.includes("포상")) return { category: "포상휴가", subType: "포상휴가" };
   if (type.includes("조퇴")) return { category: "조퇴", subType: typeRaw };
 
   if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
@@ -331,6 +333,7 @@ function summaryBase() {
     maternityLeaveHours: 0,
     pregnancyCheckupHours: 0,
     longServiceLeaveHours: 0,
+    rewardLeaveHours: 0,
     pregnancyShorterHours: 0,
   };
 }
@@ -356,6 +359,7 @@ function buildSummary(records) {
     if (r.category === "산전후휴가") summary.maternityLeaveHours += r.durationHours;
     if (r.category === "임산부정기검진") summary.pregnancyCheckupHours += r.durationHours;
     if (r.category === "근속휴가") summary.longServiceLeaveHours += r.durationHours;
+    if (r.category === "포상휴가") summary.rewardLeaveHours += r.durationHours;
     if (r.category === "임신기단축") summary.pregnancyShorterHours += r.durationHours;
 
     if (r.subType.startsWith("관내출장")) summary.localTrip += 1;
@@ -425,7 +429,8 @@ function updateDashboard() {
   maternityLeaveEl.textContent = formatDurationText(summary.maternityLeaveHours);
   pregnancyCheckupEl.textContent = formatDurationText(summary.pregnancyCheckupHours);
   longServiceLeaveEl.textContent = formatDurationText(summary.longServiceLeaveHours);
-  pregnancyShorterEl.textContent = formatDurationText(summary.pregnancyShorterHours);
+  if (rewardLeaveEl) rewardLeaveEl.textContent = formatDurationText(summary.rewardLeaveHours);
+  if (pregnancyShorterEl) pregnancyShorterEl.textContent = formatDurationText(summary.pregnancyShorterHours);
 
   renderDetails(records);
 }
