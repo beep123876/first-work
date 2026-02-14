@@ -1,16 +1,27 @@
-const STORAGE_KEY = "attendanceDashboardData_v6";
-const STORAGE_KEY_CANDIDATES = ["attendanceDashboardData_v6", "attendanceDashboardData_v5", "attendanceDashboardData_v4", "attendanceDashboardData_v3", "attendanceDashboardData_v2"];
+const STORAGE_KEY = "attendanceDashboardData_v7";
+const STORAGE_KEY_CANDIDATES = [
+  "attendanceDashboardData_v7",
+  "attendanceDashboardData_v6",
+  "attendanceDashboardData_v5",
+  "attendanceDashboardData_v4",
+  "attendanceDashboardData_v3",
+  "attendanceDashboardData_v2",
+];
 const DEFAULT_DRIVE_XLSX_URL = "https://docs.google.com/spreadsheets/d/1grIcwPHx4XanTASz9UGmANC8L6bNAIMdH5D2h6wP73Q/export?format=xlsx";
 const HOURS_PER_DAY = 8;
+const CONFIG = window.DASHBOARD_CONFIG || {};
+const ALLOWED_DEPARTMENTS = Array.isArray(CONFIG.allowedDepartments) ? CONFIG.allowedDepartments : null;
 
 const state = {
   records: [],
-  employeesByMonth: new Map(),
+  employeesByDeptMonth: new Map(),
   months: [],
+  departments: [],
 };
 
 const loadDriveBtn = document.getElementById("loadDriveBtn");
 const clearBtn = document.getElementById("clearBtn");
+const departmentSelect = document.getElementById("departmentSelect");
 const monthSelect = document.getElementById("monthSelect");
 const employeeSelect = document.getElementById("employeeSelect");
 
@@ -75,20 +86,25 @@ function parseDurationFromText(text) {
   return days * HOURS_PER_DAY + hours + mins / 60;
 }
 
-function formatHoursLabel(hours) {
+function formatDurationText(hours) {
   const totalMin = Math.round((Number(hours) || 0) * 60);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  if (h > 0 && m > 0) return `${h}시간 ${m}분`;
-  if (h > 0) return `${h}시간`;
-  return `${m}분`;
+  if (totalMin <= 0) return "0시간";
+  const dayMin = HOURS_PER_DAY * 60;
+  const days = Math.floor(totalMin / dayMin);
+  const rem = totalMin % dayMin;
+  const h = Math.floor(rem / 60);
+  const m = rem % 60;
+  const parts = [];
+  if (days) parts.push(`${days}일`);
+  if (h) parts.push(`${h}시간`);
+  if (m) parts.push(`${m}분`);
+  return parts.join(" ");
 }
 
 function parseOvertimeHours(cellText) {
   if (typeof cellText === "number") return cellText;
   const text = String(cellText ?? "");
   if (!text.trim()) return 0;
-
   const labeled = text.match(/(?:총시간|총시간외|시간외시간|실근무)\s*[:：]\s*([^\n\r]+)/);
   if (labeled) return parseHourValue(labeled[1]);
   if (text.includes("신청시각") || text.includes("실근무") || text.includes("종별")) return 0;
@@ -111,7 +127,6 @@ function calcTripHours(fromLine, toLine) {
 
 function classifyLeaveType(typeRaw, durationHours) {
   const type = typeRaw.replace(/\s+/g, "");
-
   if (type.includes("병가")) return { category: "병가", subType: typeRaw };
   if (type.includes("산전후휴가")) return { category: "산전후휴가", subType: typeRaw };
   if (type.includes("임산부정기검진")) return { category: "임산부정기검진", subType: typeRaw };
@@ -119,12 +134,9 @@ function classifyLeaveType(typeRaw, durationHours) {
   if (type.includes("근속휴가")) return { category: "근속휴가", subType: "근속휴가" };
   if (type.includes("법인발전유공휴가") || type.includes("포상휴가") || type.includes("포상")) return { category: "포상휴가", subType: "포상휴가" };
   if (type.includes("조퇴")) return { category: "조퇴", subType: typeRaw };
-
   if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
-    const subType = durationHours > 0 ? `휴무(${formatHoursLabel(durationHours)})` : "휴무";
-    return { category: "휴무", subType, isDayOff: true };
+    return { category: "휴무", subType: durationHours > 0 ? `휴무(${formatDurationText(durationHours)})` : "휴무", isDayOff: true };
   }
-
   return { category: "기타", subType: typeRaw };
 }
 
@@ -141,7 +153,6 @@ function classifyTripType(rawType) {
 function parseLeaveEntries(cellText) {
   const text = String(cellText ?? "").trim();
   if (!text) return [];
-
   const lines = text.split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
   const entries = [];
   let current = null;
@@ -153,35 +164,26 @@ function parseLeaveEntries(cellText) {
       current = { typeRaw: typeMatch[1].trim(), durationHours: 0, reason: "", fromLine: "", toLine: "", raw: [line] };
       return;
     }
-
     if (!current) return;
     current.raw.push(line);
-
     const durationMatch = line.match(/^일수\/시간\s*[:：]\s*(.+)$/);
     if (durationMatch) current.durationHours = parseDurationFromText(durationMatch[1]);
-
     const reasonMatch = line.match(/^사유\s*[:：]\s*(.+)$/);
     if (reasonMatch) current.reason = reasonMatch[1].trim();
-
     if (/^부터\s*[:：]\s*/.test(line)) current.fromLine = line;
     if (/^까지\s*[:：]\s*/.test(line)) current.toLine = line;
   });
 
   if (current) entries.push(current);
-
   entries.forEach((entry) => {
-    if (entry.durationHours <= 0) {
-      entry.durationHours = parseDurationFromText(entry.raw.join("\n"));
-    }
+    if (entry.durationHours <= 0) entry.durationHours = parseDurationFromText(entry.raw.join("\n"));
   });
-
   return entries;
 }
 
 function parseTripEntries(cellText) {
   const text = String(cellText ?? "").trim();
   if (!text) return [];
-
   const lines = text.split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
   const entries = [];
   let current = null;
@@ -193,7 +195,6 @@ function parseTripEntries(cellText) {
       current = { typeRaw: typeMatch[1].trim(), fromLine: "", toLine: "", reason: "" };
       return;
     }
-
     if (!current) return;
     if (/^부터\s*[:：]\s*/.test(line)) current.fromLine = line;
     if (/^까지\s*[:：]\s*/.test(line)) current.toLine = line;
@@ -209,6 +210,7 @@ function parseRow(row, sheetName) {
   const name = String(row["성명"] ?? row["이름"] ?? "").trim();
   if (!name) return [];
 
+  const department = String(row["부서"] ?? row["소속"] ?? row["팀"] ?? "미지정").trim() || "미지정";
   const employeeId = String(row["사원번호"] ?? row["사번"] ?? "-").trim() || "-";
   const date = parseDate(row["날짜"] ?? row["일자"]);
   const dateIso = date ? date.toISOString().slice(0, 10) : "-";
@@ -216,12 +218,12 @@ function parseRow(row, sheetName) {
 
   const overtimeHours = parseOvertimeHours(row["시간외관리"] ?? row["시간외(시간)"] ?? row["시간외"]);
   if (overtimeHours > 0) {
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "시간외", subType: "시간외근무", detail: "시간외근무", overtimeHours, durationHours: 0, isDayOff: false, dedupeKey: "" });
+    results.push({ month: sheetName, department, name, employeeId, date: dateIso, category: "시간외", detail: "시간외근무", overtimeHours, durationHours: 0, dedupeKey: "" });
   }
 
   const earlyLeaveHours = parseHourValue(row["조기퇴근"] ?? row["조퇴"]);
   if (earlyLeaveHours > 0) {
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "조퇴", subType: `조기퇴근`, detail: "조기퇴근", overtimeHours: 0, durationHours: earlyLeaveHours, isDayOff: false, dedupeKey: "" });
+    results.push({ month: sheetName, department, name, employeeId, date: dateIso, category: "조퇴", detail: "조기퇴근", overtimeHours: 0, durationHours: earlyLeaveHours, dedupeKey: "" });
   }
 
   const leaveEntries = parseLeaveEntries(row["휴가관리"] ?? row["근태유형"] ?? row["유형"]);
@@ -230,19 +232,17 @@ function parseRow(row, sheetName) {
     const periodKey = `${entry.fromLine}|${entry.toLine}`;
     const periodDate = parseDateTimeFromLine(entry.fromLine);
     const recordDate = periodDate ? periodDate.toISOString().slice(0, 10) : dateIso;
-
     results.push({
       month: sheetName,
+      department,
       name,
       employeeId,
       date: recordDate,
       category: c.category,
-      subType: c.subType,
       detail: entry.reason || c.subType,
       overtimeHours: 0,
       durationHours: entry.durationHours,
-      isDayOff: Boolean(c.isDayOff),
-      dedupeKey: periodKey && periodKey !== "|" ? `${name}|${c.category}|${c.subType}|${entry.reason}|${entry.durationHours}|${periodKey}` : "",
+      dedupeKey: periodKey && periodKey !== "|" ? `${name}|${department}|${c.category}|${entry.reason}|${entry.durationHours}|${periodKey}` : "",
     });
   });
 
@@ -250,7 +250,7 @@ function parseRow(row, sheetName) {
   tripEntries.forEach((entry) => {
     const c = classifyTripType(entry.typeRaw);
     const tripHours = calcTripHours(entry.fromLine, entry.toLine);
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: c.category, subType: c.subType, detail: entry.reason || c.subType, overtimeHours: 0, durationHours: tripHours, isDayOff: false, dedupeKey: "" });
+    results.push({ month: sheetName, department, name, employeeId, date: dateIso, category: c.category, detail: entry.reason || c.subType, tripType: c.subType, overtimeHours: 0, durationHours: tripHours, dedupeKey: "" });
   });
 
   return results;
@@ -259,7 +259,6 @@ function parseRow(row, sheetName) {
 function parseWorkbook(arrayBuffer) {
   const workbook = XLSX.read(arrayBuffer, { type: "array" });
   const allRecords = [];
-
   workbook.SheetNames.forEach((sheetName) => {
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
     rows.forEach((row) => allRecords.push(...parseRow(row, sheetName)));
@@ -273,21 +272,25 @@ function parseWorkbook(arrayBuffer) {
     return true;
   });
 
-  return { records: deduped, months: workbook.SheetNames.slice() };
+  const departments = [...new Set(deduped.map((r) => r.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+  return { records: deduped, months: workbook.SheetNames.slice(), departments };
 }
 
 function applyParsedData(parsed) {
   state.records = parsed.records;
   state.months = parsed.months;
+  state.departments = parsed.departments || [...new Set(parsed.records.map((r) => r.department))];
   rebuildEmployeeMap();
 }
 
 function rebuildEmployeeMap() {
-  state.employeesByMonth = new Map();
+  state.employeesByDeptMonth = new Map();
   state.records.forEach((r) => {
-    if (!state.employeesByMonth.has(r.month)) state.employeesByMonth.set(r.month, new Map());
-    const monthMap = state.employeesByMonth.get(r.month);
-    if (!monthMap.has(r.name)) monthMap.set(r.name, r.employeeId);
+    if (!state.employeesByDeptMonth.has(r.department)) state.employeesByDeptMonth.set(r.department, new Map());
+    const monthMapAll = state.employeesByDeptMonth.get(r.department);
+    if (!monthMapAll.has(r.month)) monthMapAll.set(r.month, new Map());
+    const employeeMap = monthMapAll.get(r.month);
+    if (!employeeMap.has(r.name)) employeeMap.set(r.name, r.employeeId);
   });
 }
 
@@ -297,6 +300,26 @@ function sortMonths(months) {
     const bm = Number((b.match(/\d+/) || [999])[0]);
     return am - bm || a.localeCompare(b, "ko");
   });
+}
+
+function getVisibleDepartments() {
+  if (!ALLOWED_DEPARTMENTS || !ALLOWED_DEPARTMENTS.length) return state.departments;
+  return state.departments.filter((d) => ALLOWED_DEPARTMENTS.includes(d));
+}
+
+function populateDepartments() {
+  departmentSelect.innerHTML = '<option value="">부서를 선택하세요</option>';
+  getVisibleDepartments().forEach((dept) => {
+    const option = document.createElement("option");
+    option.value = dept;
+    option.textContent = dept;
+    departmentSelect.appendChild(option);
+  });
+
+  if (ALLOWED_DEPARTMENTS && ALLOWED_DEPARTMENTS.length === 1) {
+    departmentSelect.value = ALLOWED_DEPARTMENTS[0];
+    departmentSelect.disabled = true;
+  }
 }
 
 function populateMonths() {
@@ -310,10 +333,11 @@ function populateMonths() {
 }
 
 function populateEmployees() {
+  const dept = departmentSelect.value;
   const month = monthSelect.value;
-  const monthMap = state.employeesByMonth.get(month) || new Map();
+  const employeeMap = state.employeesByDeptMonth.get(dept)?.get(month) || new Map();
   employeeSelect.innerHTML = '<option value="">직원을 선택하세요</option>';
-  [...monthMap.keys()].sort((a, b) => a.localeCompare(b, "ko")).forEach((name) => {
+  [...employeeMap.keys()].sort((a, b) => a.localeCompare(b, "ko")).forEach((name) => {
     const opt = document.createElement("option");
     opt.value = name;
     opt.textContent = name;
@@ -338,15 +362,12 @@ function summaryBase() {
   };
 }
 
-function toDay(hours) {
-  return hours / HOURS_PER_DAY;
-}
-
 function getSelectedRecords() {
+  const dept = departmentSelect.value;
   const month = monthSelect.value;
   const name = employeeSelect.value;
-  if (!month || !name) return [];
-  return state.records.filter((r) => r.month === month && r.name === name);
+  if (!dept || !month || !name) return [];
+  return state.records.filter((r) => r.department === dept && r.month === month && r.name === name);
 }
 
 function buildSummary(records) {
@@ -362,32 +383,13 @@ function buildSummary(records) {
     if (r.category === "포상휴가") summary.rewardLeaveHours += r.durationHours;
     if (r.category === "임신기단축") summary.pregnancyShorterHours += r.durationHours;
 
-    if (r.subType.startsWith("관내출장")) summary.localTrip += 1;
-    if (r.subType.startsWith("관외출장")) summary.outsideTrip += 1;
-    if (r.subType.startsWith("국외출장")) summary.internationalTrip += 1;
+    if (r.tripType === "관내출장") summary.localTrip += 1;
+    if (r.tripType === "관외출장") summary.outsideTrip += 1;
+    if (r.tripType === "국외출장") summary.internationalTrip += 1;
   });
   return summary;
 }
 
-function formatDays(hours) {
-  return toDay(hours).toFixed(2);
-}
-
-
-function formatDurationText(hours) {
-  const totalMin = Math.round((Number(hours) || 0) * 60);
-  if (totalMin <= 0) return "0시간";
-  const dayMin = HOURS_PER_DAY * 60;
-  const days = Math.floor(totalMin / dayMin);
-  const rem = totalMin % dayMin;
-  const h = Math.floor(rem / 60);
-  const m = rem % 60;
-  const parts = [];
-  if (days) parts.push(`${days}일`);
-  if (h) parts.push(`${h}시간`);
-  if (m) parts.push(`${m}분`);
-  return parts.join(" ");
-}
 function renderDetails(records) {
   if (!records.length) {
     detailRows.innerHTML = '<tr><td colspan="4" class="empty">표시할 데이터가 없습니다.</td></tr>';
@@ -396,12 +398,10 @@ function renderDetails(records) {
 
   const grouped = new Map();
   records.forEach((r) => {
-    const detail = r.detail || r.subType || "-";
+    const detail = r.detail || "-";
     const key = `${r.date}__${r.category}__${detail}`;
     const hours = (r.overtimeHours || 0) + (r.durationHours || 0);
-    if (!grouped.has(key)) {
-      grouped.set(key, { date: r.date, category: r.category, detail, hours: 0 });
-    }
+    if (!grouped.has(key)) grouped.set(key, { date: r.date, category: r.category, detail, hours: 0 });
     grouped.get(key).hours += hours;
   });
 
@@ -412,9 +412,10 @@ function renderDetails(records) {
 }
 
 function updateDashboard() {
+  const dept = departmentSelect.value;
   const month = monthSelect.value;
   const name = employeeSelect.value;
-  const employeeId = state.employeesByMonth.get(month)?.get(name) || "-";
+  const employeeId = state.employeesByDeptMonth.get(dept)?.get(month)?.get(name) || "-";
   const records = getSelectedRecords();
   const summary = buildSummary(records);
 
@@ -428,7 +429,7 @@ function updateDashboard() {
   internationalTripEl.textContent = String(summary.internationalTrip);
   maternityLeaveEl.textContent = formatDurationText(summary.maternityLeaveHours);
   pregnancyCheckupEl.textContent = formatDurationText(summary.pregnancyCheckupHours);
-  longServiceLeaveEl.textContent = formatDurationText(summary.longServiceLeaveHours);
+  if (longServiceLeaveEl) longServiceLeaveEl.textContent = formatDurationText(summary.longServiceLeaveHours);
   if (rewardLeaveEl) rewardLeaveEl.textContent = formatDurationText(summary.rewardLeaveHours);
   if (pregnancyShorterEl) pregnancyShorterEl.textContent = formatDurationText(summary.pregnancyShorterHours);
 
@@ -436,7 +437,7 @@ function updateDashboard() {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ records: state.records, months: state.months, savedAt: new Date().toISOString() }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ records: state.records, months: state.months, departments: state.departments, savedAt: new Date().toISOString() }));
 }
 
 function loadSavedState() {
@@ -448,19 +449,21 @@ function loadSavedState() {
       const parsed = JSON.parse(raw);
       const records = Array.isArray(parsed.records) ? parsed.records : [];
       const months = Array.isArray(parsed.months) ? parsed.months : [];
+      const departments = Array.isArray(parsed.departments) ? parsed.departments : [...new Set(records.map((r) => r.department).filter(Boolean))];
       if (!records.length) continue;
-
-      applyParsedData({ records, months });
+      applyParsedData({ records, months, departments });
+      populateDepartments();
       populateMonths();
       if (key !== STORAGE_KEY) saveState();
       return;
     } catch {
-      // 다음 키 시도
+      // continue
     }
   }
 
   state.records = [];
   state.months = [];
+  state.departments = [];
 }
 
 async function fetchWithTimeout(url, timeoutMs = 12000) {
@@ -487,7 +490,6 @@ function buildFetchTargets(downloadUrl) {
 async function fetchWorkbookBuffer(downloadUrl) {
   const targets = buildFetchTargets(downloadUrl);
   let lastError = null;
-
   for (const target of targets) {
     try {
       const response = await fetchWithTimeout(target.url);
@@ -499,7 +501,6 @@ async function fetchWorkbookBuffer(downloadUrl) {
       lastError = error;
     }
   }
-
   throw new Error(`엑셀 다운로드 실패 (${lastError?.message ?? "알 수 없는 오류"})`);
 }
 
@@ -507,13 +508,17 @@ async function loadFromDrive() {
   const downloadUrl = convertDriveUrl(DEFAULT_DRIVE_XLSX_URL);
   const buffer = await fetchWorkbookBuffer(downloadUrl);
   const parsed = parseWorkbook(buffer);
-  if (!parsed.records.length) {
-    throw new Error("엑셀은 내려받았지만 파싱된 근태 데이터가 0건입니다. 시트 구조(종별/일수/시간)를 확인하세요.");
-  }
-
+  if (!parsed.records.length) throw new Error("엑셀 파싱 0건");
   applyParsedData(parsed);
   saveState();
+  populateDepartments();
   populateMonths();
+
+  const visibleDepartments = getVisibleDepartments();
+  if (!departmentSelect.value && visibleDepartments.length) {
+    departmentSelect.value = visibleDepartments[0];
+  }
+
   monthSelect.value = sortMonths(state.months)[0] || "";
   populateEmployees();
   updateDashboard();
@@ -524,7 +529,7 @@ loadDriveBtn.addEventListener("click", async () => {
     await loadFromDrive();
     alert(`드라이브 파일을 반영했습니다. 전체 ${state.records.length}건`);
   } catch (error) {
-    alert(`불러오기에 실패했습니다.\n1) 시트 공유 권한(링크 보기 가능)\n2) 사내망에서 외부 주소/프록시 접근 허용 여부\n3) 가능하면 로컬/사내 서버(http) 실행\n을 확인하세요.\n\n상세 오류: ${error.message}`);
+    alert(`불러오기에 실패했습니다.\n상세 오류: ${error.message}`);
   }
 });
 
@@ -532,13 +537,19 @@ clearBtn.addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
   state.records = [];
   state.months = [];
-  state.employeesByMonth.clear();
+  state.departments = [];
+  state.employeesByDeptMonth.clear();
+  populateDepartments();
   populateMonths();
   populateEmployees();
   updateDashboard();
-  alert("저장된 데이터/링크를 초기화했습니다.");
+  alert("저장된 데이터를 초기화했습니다.");
 });
 
+departmentSelect.addEventListener("change", () => {
+  populateEmployees();
+  updateDashboard();
+});
 monthSelect.addEventListener("change", () => {
   populateEmployees();
   updateDashboard();
@@ -546,11 +557,18 @@ monthSelect.addEventListener("change", () => {
 employeeSelect.addEventListener("change", updateDashboard);
 
 loadSavedState();
+populateDepartments();
+populateMonths();
+
+if (ALLOWED_DEPARTMENTS && ALLOWED_DEPARTMENTS.length === 1 && !departmentSelect.value) {
+  departmentSelect.value = ALLOWED_DEPARTMENTS[0];
+}
+
 populateEmployees();
 updateDashboard();
 
 if (!state.records.length) {
   loadFromDrive().catch((error) => {
-    alert(`초기 데이터 로딩에 실패했습니다.\n네트워크 정책 또는 공유권한 문제일 수 있습니다.\n상세 오류: ${error.message}`);
+    alert(`초기 데이터 로딩에 실패했습니다.\n상세 오류: ${error.message}`);
   });
 }
