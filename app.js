@@ -30,6 +30,12 @@ const detailRows = document.getElementById("detailRows");
 
 function convertDriveUrl(url) {
   const trimmed = url.trim();
+
+  if (trimmed.includes("docs.google.com/spreadsheets/d/") && trimmed.includes("/edit")) {
+    const fileId = trimmed.match(/\/d\/([^/]+)/)?.[1];
+    if (fileId) return `https://docs.google.com/spreadsheets/d/${fileId}/export?format=xlsx`;
+  }
+
   const fileMatch = trimmed.match(/\/file\/d\/([^/]+)/);
   if (fileMatch) return `https://drive.google.com/uc?export=download&id=${fileMatch[1]}`;
 
@@ -329,6 +335,10 @@ function loadSavedState() {
 }
 
 async function loadFromDrive() {
+  if (window.location.protocol === "file:") {
+    throw new Error("index.html을 파일로 직접 열면 브라우저 보안(CORS)으로 외부 엑셀 다운로드가 차단됩니다. 로컬 서버(http://localhost)로 실행하세요.");
+  }
+
   const downloadUrl = convertDriveUrl(DEFAULT_DRIVE_XLSX_URL);
   const response = await fetch(downloadUrl);
   if (!response.ok) throw new Error(`다운로드 실패: ${response.status}`);
@@ -347,7 +357,7 @@ loadDriveBtn.addEventListener("click", async () => {
     await loadFromDrive();
     alert(`드라이브 파일을 반영했습니다. 전체 ${state.records.length}건`);
   } catch (error) {
-    alert(`불러오기에 실패했습니다. 파일 공유 권한을 '링크가 있는 모든 사용자(보기)'로 설정했는지 확인하세요.\n${error.message}`);
+    alert(`불러오기에 실패했습니다.\n1) 시트 공유 권한(링크 보기 가능)\n2) index.html을 파일로 직접 열지 말고 로컬/사내 서버(http)로 실행\n을 확인하세요.\n\n상세 오류: ${error.message}`);
   }
 });
 
@@ -374,6 +384,6 @@ updateDashboard();
 
 if (!state.records.length) {
   loadFromDrive().catch((error) => {
-    alert(`초기 데이터 로딩에 실패했습니다. 관리자에게 문의하세요.\n${error.message}`);
+    alert(`초기 데이터 로딩에 실패했습니다.\n파일 직접 실행이 아닌 서버 실행인지 확인해주세요.\n(예: python -m http.server)\n\n상세 오류: ${error.message}`);
   });
 }
