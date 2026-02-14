@@ -1,5 +1,6 @@
-const STORAGE_KEY = "attendanceDashboardData_v2";
-const DRIVE_URL_KEY = "attendanceDashboardDriveUrl_v1";
+const STORAGE_KEY = "attendanceDashboardData_v3";
+const DEFAULT_DRIVE_XLSX_URL = "https://docs.google.com/spreadsheets/d/1grIcwPHx4XanTASz9UGmANC8L6bNAIMdH5D2h6wP73Q/export?format=xlsx";
+const HOURS_PER_DAY = 8;
 
 const state = {
   records: [],
@@ -7,9 +8,7 @@ const state = {
   months: [],
 };
 
-const driveUrlInput = document.getElementById("driveUrl");
 const loadDriveBtn = document.getElementById("loadDriveBtn");
-const saveUrlBtn = document.getElementById("saveUrlBtn");
 const clearBtn = document.getElementById("clearBtn");
 const monthSelect = document.getElementById("monthSelect");
 const employeeSelect = document.getElementById("employeeSelect");
@@ -55,13 +54,38 @@ function parseDate(value) {
   return null;
 }
 
-function parseHourText(text) {
-  if (!text) return 0;
-  const cleaned = String(text).trim();
-  const hhmm = cleaned.match(/(\d{1,2}):(\d{1,2})/);
+function parseHourValue(value) {
+  if (typeof value === "number") return value;
+  if (!value) return 0;
+  const text = String(value).trim();
+  const hhmm = text.match(/(\d{1,2})\s*:\s*(\d{1,2})/);
   if (hhmm) return Number(hhmm[1]) + Number(hhmm[2]) / 60;
-  const numberOnly = cleaned.match(/\d+(\.\d+)?/);
-  return numberOnly ? Number(numberOnly[0]) : 0;
+  const n = text.match(/\d+(\.\d+)?/);
+  return n ? Number(n[0]) : 0;
+}
+
+function parseLeaveDurationHours(cellText) {
+  const text = String(cellText ?? "");
+  const days = Number(text.match(/(\d+)\s*일/)?.[1] ?? 0);
+  const hours = Number(text.match(/(\d+)\s*시간/)?.[1] ?? 0);
+  const mins = Number(text.match(/(\d+)\s*분/)?.[1] ?? 0);
+  const total = days * HOURS_PER_DAY + hours + mins / 60;
+  return total > 0 ? total : 0;
+}
+
+function parseOvertimeHours(cellText) {
+  if (typeof cellText === "number") return cellText;
+  const text = String(cellText ?? "");
+  if (!text.trim()) return 0;
+
+  const labeled = text.match(/(?:총시간|총시간외|시간외시간|실근무)\s*[:：]\s*([^\n\r]+)/);
+  if (labeled) return parseHourValue(labeled[1]);
+
+  if (text.includes("신청시각") || text.includes("실근무") || text.includes("종별")) {
+    return 0;
+  }
+
+  return parseHourValue(text);
 }
 
 function extractTypeList(cellText) {
@@ -72,10 +96,8 @@ function extractTypeList(cellText) {
   return text.trim() ? [text.trim()] : [];
 }
 
-function classifyType(rawType, bucket) {
+function classifyType(rawType) {
   const type = rawType.replace(/\s+/g, "");
-  if (bucket === "earlyLeave") return { category: "조퇴", subType: "조기퇴근" };
-  if (bucket === "overtime") return { category: "시간외", subType: "시간외근무" };
 
   if (type.includes("병가")) return { category: "병가", subType: rawType };
   if (type.includes("산전후휴가")) return { category: "산전후휴가", subType: rawType };
@@ -87,12 +109,8 @@ function classifyType(rawType, bucket) {
   if (type.includes("국내출장")) return { category: "출장", subType: "국내출장" };
   if (type.includes("출장")) return { category: "출장", subType: rawType };
 
-  if (type.includes("전년도") && type.includes("대체휴무")) {
-    return { category: "휴가", subType: "전년도대체휴무" };
-  }
-  if (!type.includes("전년도") && type.includes("대체휴무")) {
-    return { category: "휴가", subType: "당해대체휴무" };
-  }
+  if (type.includes("전년도") && type.includes("대체휴무")) return { category: "휴가", subType: "전년도대체휴무" };
+  if (!type.includes("전년도") && type.includes("대체휴무")) return { category: "휴가", subType: "당해대체휴무" };
   if (type.includes("휴가")) return { category: "휴가", subType: rawType };
 
   return { category: "기타", subType: rawType };
@@ -108,27 +126,37 @@ function parseRow(row, sheetName) {
 
   const results = [];
 
-  const overtimeCell = row["시간외관리"] ?? row["시간외(시간)"] ?? row["시간외"];
-  const overtimeHours = parseHourText(String(overtimeCell ?? "").match(/총시간\s*[:：]\s*([^\n\r]+)/)?.[1] ?? overtimeCell);
+  const overtimeHours = parseOvertimeHours(row["시간외관리"] ?? row["시간외(시간)"] ?? row["시간외"]);
   if (overtimeHours > 0) {
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "시간외", subType: "시간외근무", overtimeHours });
+    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "시간외", subType: "시간외근무", overtimeHours, durationHours: 0 });
   }
 
-  const earlyLeaveCell = row["조기퇴근"] ?? row["조퇴"];
-  if (parseHourText(earlyLeaveCell) > 0) {
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "조퇴", subType: "조기퇴근", overtimeHours: 0 });
+  const earlyLeaveHours = parseHourValue(row["조기퇴근"] ?? row["조퇴"]);
+  if (earlyLeaveHours > 0) {
+    results.push({ month: sheetName, name, employeeId, date: dateIso, category: "조퇴", subType: "조기퇴근", overtimeHours: 0, durationHours: earlyLeaveHours });
   }
 
-  const leaveTypes = extractTypeList(row["휴가관리"] ?? row["근태유형"] ?? row["유형"]);
+  const leaveCell = row["휴가관리"] ?? row["근태유형"] ?? row["유형"];
+  const leaveDurationHours = parseLeaveDurationHours(leaveCell);
+  const leaveTypes = extractTypeList(leaveCell);
   leaveTypes.forEach((t) => {
-    const c = classifyType(t, "leave");
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: c.category, subType: c.subType, overtimeHours: 0 });
+    const c = classifyType(t);
+    results.push({
+      month: sheetName,
+      name,
+      employeeId,
+      date: dateIso,
+      category: c.category,
+      subType: c.subType,
+      overtimeHours: 0,
+      durationHours: c.category === "휴가" || c.category === "병가" || c.category === "산전후휴가" || c.category === "임산부정기검진" ? leaveDurationHours : 0,
+    });
   });
 
   const tripTypes = extractTypeList(row["출장관리"]);
   tripTypes.forEach((t) => {
-    const c = classifyType(t, "trip");
-    results.push({ month: sheetName, name, employeeId, date: dateIso, category: c.category, subType: c.subType, overtimeHours: 0 });
+    const c = classifyType(t);
+    results.push({ month: sheetName, name, employeeId, date: dateIso, category: c.category, subType: c.subType, overtimeHours: 0, durationHours: 0 });
   });
 
   return results;
@@ -140,9 +168,7 @@ function parseWorkbook(arrayBuffer) {
 
   workbook.SheetNames.forEach((sheetName) => {
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
-    rows.forEach((row) => {
-      allRecords.push(...parseRow(row, sheetName));
-    });
+    rows.forEach((row) => allRecords.push(...parseRow(row, sheetName)));
   });
 
   state.records = allRecords;
@@ -192,18 +218,22 @@ function populateEmployees() {
 function summaryBase() {
   return {
     overtime: 0,
-    vacation: 0,
-    sickLeave: 0,
-    earlyLeave: 0,
+    vacationHours: 0,
+    sickLeaveHours: 0,
+    earlyLeaveHours: 0,
     domesticTrip: 0,
     internationalTrip: 0,
     localTrip: 0,
     outsideTrip: 0,
-    maternityLeave: 0,
-    pregnancyCheckup: 0,
-    compThisYear: 0,
-    compPrevYear: 0,
+    maternityLeaveHours: 0,
+    pregnancyCheckupHours: 0,
+    compThisYearHours: 0,
+    compPrevYearHours: 0,
   };
+}
+
+function toDay(hours) {
+  return hours / HOURS_PER_DAY;
 }
 
 function getSelectedRecords() {
@@ -217,14 +247,14 @@ function buildSummary(records) {
   const summary = summaryBase();
   records.forEach((r) => {
     if (r.category === "시간외") summary.overtime += r.overtimeHours;
-    if (r.category === "휴가") summary.vacation += 1;
-    if (r.category === "병가") summary.sickLeave += 1;
-    if (r.category === "조퇴") summary.earlyLeave += 1;
-    if (r.category === "산전후휴가") summary.maternityLeave += 1;
-    if (r.category === "임산부정기검진") summary.pregnancyCheckup += 1;
+    if (r.category === "휴가") summary.vacationHours += r.durationHours;
+    if (r.category === "병가") summary.sickLeaveHours += r.durationHours;
+    if (r.category === "조퇴") summary.earlyLeaveHours += r.durationHours;
+    if (r.category === "산전후휴가") summary.maternityLeaveHours += r.durationHours;
+    if (r.category === "임산부정기검진") summary.pregnancyCheckupHours += r.durationHours;
 
-    if (r.subType === "당해대체휴무") summary.compThisYear += 1;
-    if (r.subType === "전년도대체휴무") summary.compPrevYear += 1;
+    if (r.subType === "당해대체휴무") summary.compThisYearHours += r.durationHours;
+    if (r.subType === "전년도대체휴무") summary.compPrevYearHours += r.durationHours;
 
     if (r.subType === "국내출장") summary.domesticTrip += 1;
     if (r.subType === "국외출장") summary.internationalTrip += 1;
@@ -232,6 +262,10 @@ function buildSummary(records) {
     if (r.subType === "관외출장") summary.outsideTrip += 1;
   });
   return summary;
+}
+
+function formatDays(hours) {
+  return toDay(hours).toFixed(2);
 }
 
 function renderDetails(records) {
@@ -243,7 +277,10 @@ function renderDetails(records) {
   detailRows.innerHTML = records
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
-    .map((r) => `<tr><td>${r.date}</td><td>${r.category}</td><td>${r.subType}</td><td>${r.overtimeHours || 0}</td></tr>`)
+    .map(
+      (r) =>
+        `<tr><td>${r.date}</td><td>${r.category}</td><td>${r.subType}</td><td>${r.overtimeHours > 0 ? r.overtimeHours.toFixed(2) : "-"}</td></tr>`,
+    )
     .join("");
 }
 
@@ -255,18 +292,18 @@ function updateDashboard() {
   const summary = buildSummary(records);
 
   empNoEl.textContent = employeeId;
-  overtimeEl.textContent = summary.overtime.toFixed(1);
-  vacationEl.textContent = String(summary.vacation);
-  sickLeaveEl.textContent = String(summary.sickLeave);
-  earlyLeaveEl.textContent = String(summary.earlyLeave);
+  overtimeEl.textContent = summary.overtime.toFixed(2);
+  vacationEl.textContent = formatDays(summary.vacationHours);
+  sickLeaveEl.textContent = formatDays(summary.sickLeaveHours);
+  earlyLeaveEl.textContent = formatDays(summary.earlyLeaveHours);
   domesticTripEl.textContent = String(summary.domesticTrip);
   internationalTripEl.textContent = String(summary.internationalTrip);
   localTripEl.textContent = String(summary.localTrip);
   outsideTripEl.textContent = String(summary.outsideTrip);
-  maternityLeaveEl.textContent = String(summary.maternityLeave);
-  pregnancyCheckupEl.textContent = String(summary.pregnancyCheckup);
-  compThisYearEl.textContent = String(summary.compThisYear);
-  compPrevYearEl.textContent = String(summary.compPrevYear);
+  maternityLeaveEl.textContent = formatDays(summary.maternityLeaveHours);
+  pregnancyCheckupEl.textContent = formatDays(summary.pregnancyCheckupHours);
+  compThisYearEl.textContent = formatDays(summary.compThisYearHours);
+  compPrevYearEl.textContent = formatDays(summary.compPrevYearHours);
 
   renderDetails(records);
 }
@@ -277,8 +314,6 @@ function saveState() {
 
 function loadSavedState() {
   const raw = localStorage.getItem(STORAGE_KEY);
-  const savedUrl = localStorage.getItem(DRIVE_URL_KEY);
-  if (savedUrl) driveUrlInput.value = savedUrl;
   if (!raw) return;
 
   try {
@@ -294,20 +329,13 @@ function loadSavedState() {
 }
 
 async function loadFromDrive() {
-  const sourceUrl = driveUrlInput.value.trim();
-  if (!sourceUrl) {
-    alert("구글드라이브 링크를 입력하세요.");
-    return;
-  }
-
-  const downloadUrl = convertDriveUrl(sourceUrl);
+  const downloadUrl = convertDriveUrl(DEFAULT_DRIVE_XLSX_URL);
   const response = await fetch(downloadUrl);
   if (!response.ok) throw new Error(`다운로드 실패: ${response.status}`);
 
   const buffer = await response.arrayBuffer();
   parseWorkbook(buffer);
   saveState();
-  localStorage.setItem(DRIVE_URL_KEY, sourceUrl);
   populateMonths();
   monthSelect.value = sortMonths(state.months)[0] || "";
   populateEmployees();
@@ -323,18 +351,11 @@ loadDriveBtn.addEventListener("click", async () => {
   }
 });
 
-saveUrlBtn.addEventListener("click", () => {
-  localStorage.setItem(DRIVE_URL_KEY, driveUrlInput.value.trim());
-  alert("구글드라이브 링크를 저장했습니다.");
-});
-
 clearBtn.addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(DRIVE_URL_KEY);
   state.records = [];
   state.months = [];
   state.employeesByMonth.clear();
-  driveUrlInput.value = "";
   populateMonths();
   populateEmployees();
   updateDashboard();
@@ -350,3 +371,9 @@ employeeSelect.addEventListener("change", updateDashboard);
 loadSavedState();
 populateEmployees();
 updateDashboard();
+
+if (!state.records.length) {
+  loadFromDrive().catch((error) => {
+    alert(`초기 데이터 로딩에 실패했습니다. 관리자에게 문의하세요.\n${error.message}`);
+  });
+}
