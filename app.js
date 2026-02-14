@@ -11,6 +11,20 @@ const DEFAULT_DRIVE_XLSX_URL = "https://docs.google.com/spreadsheets/d/1grIcwPHx
 const HOURS_PER_DAY = 8;
 const CONFIG = window.DASHBOARD_CONFIG || {};
 const ALLOWED_DEPARTMENTS = Array.isArray(CONFIG.allowedDepartments) ? CONFIG.allowedDepartments : null;
+const DEPARTMENT_CANONICAL = ["경영정책그룹", "콘텐츠기획그룹", "지역문화그룹", "문화교육그룹", "공연문화그룹", "도시관광그룹", "학예연구팀"];
+
+function normalizeDepartmentName(name) {
+  return String(name ?? "").replace(/\s+/g, "").trim();
+}
+
+function canonicalizeDepartmentName(name) {
+  const normalized = normalizeDepartmentName(name);
+  if (!normalized) return "미지정";
+  const known = DEPARTMENT_CANONICAL.find((d) => normalizeDepartmentName(d) === normalized);
+  return known || normalized;
+}
+
+const ALLOWED_DEPT_NORMALIZED = ALLOWED_DEPARTMENTS ? ALLOWED_DEPARTMENTS.map(normalizeDepartmentName) : null;
 
 const state = {
   records: [],
@@ -210,7 +224,7 @@ function parseRow(row, sheetName) {
   const name = String(row["성명"] ?? row["이름"] ?? "").trim();
   if (!name) return [];
 
-  const department = String(row["부서"] ?? row["소속"] ?? row["팀"] ?? "미지정").trim() || "미지정";
+  const department = canonicalizeDepartmentName(row["부서"] ?? row["소속"] ?? row["팀"] ?? "미지정");
   const employeeId = String(row["사원번호"] ?? row["사번"] ?? "-").trim() || "-";
   const date = parseDate(row["날짜"] ?? row["일자"]);
   const dateIso = date ? date.toISOString().slice(0, 10) : "-";
@@ -303,8 +317,8 @@ function sortMonths(months) {
 }
 
 function getVisibleDepartments() {
-  if (!ALLOWED_DEPARTMENTS || !ALLOWED_DEPARTMENTS.length) return state.departments;
-  return state.departments.filter((d) => ALLOWED_DEPARTMENTS.includes(d));
+  if (!ALLOWED_DEPT_NORMALIZED || !ALLOWED_DEPT_NORMALIZED.length) return state.departments;
+  return state.departments.filter((d) => ALLOWED_DEPT_NORMALIZED.includes(normalizeDepartmentName(d)));
 }
 
 function populateDepartments() {
@@ -317,7 +331,9 @@ function populateDepartments() {
   });
 
   if (ALLOWED_DEPARTMENTS && ALLOWED_DEPARTMENTS.length === 1) {
-    departmentSelect.value = ALLOWED_DEPARTMENTS[0];
+    const targetNorm = ALLOWED_DEPT_NORMALIZED[0];
+    const matched = getVisibleDepartments().find((d) => normalizeDepartmentName(d) === targetNorm);
+    if (matched) departmentSelect.value = matched;
     departmentSelect.disabled = true;
   }
 }
@@ -561,7 +577,9 @@ populateDepartments();
 populateMonths();
 
 if (ALLOWED_DEPARTMENTS && ALLOWED_DEPARTMENTS.length === 1 && !departmentSelect.value) {
-  departmentSelect.value = ALLOWED_DEPARTMENTS[0];
+  const targetNorm = ALLOWED_DEPT_NORMALIZED[0];
+  const matched = getVisibleDepartments().find((d) => normalizeDepartmentName(d) === targetNorm);
+  if (matched) departmentSelect.value = matched;
 }
 
 populateEmployees();
