@@ -1,5 +1,4 @@
 :root {
-  color-scheme: light;
   font-family: "Segoe UI", "Noto Sans KR", Arial, sans-serif;
   --bg: #f2f5fb;
   --card: #ffffff;
@@ -7,11 +6,10 @@
   --text: #1e2b4a;
   --muted: #62708d;
   --border: #dce3f0;
+  --danger: #c74040;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -20,21 +18,15 @@ body {
 }
 
 .container {
-  max-width: 1000px;
-  margin: 32px auto;
+  max-width: 1100px;
+  margin: 28px auto;
   padding: 0 16px 40px;
   display: grid;
   gap: 16px;
 }
 
-.hero h1 {
-  margin-bottom: 8px;
-}
-
-.hero p {
-  margin: 0;
-  color: var(--muted);
-}
+.hero h1 { margin: 0 0 8px; }
+.hero p { margin: 0; color: var(--muted); }
 
 .card {
   background: var(--card);
@@ -44,25 +36,18 @@ body {
   box-shadow: 0 6px 16px rgba(35, 57, 108, 0.06);
 }
 
-.control-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
+.control-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.control-row.inline { flex-direction: row; flex-wrap: wrap; }
+
+.selectors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
 }
 
-.control-row.inline {
-  flex-direction: row;
-}
+button, input, select { font: inherit; }
 
-button,
-input,
-select {
-  font: inherit;
-}
-
-input[type="file"],
-select {
+input, select {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
@@ -76,21 +61,14 @@ button {
   color: #fff;
   cursor: pointer;
 }
+button.ghost { background: #e7edfc; color: #1f3e89; }
+button.danger { background: #fee8e8; color: var(--danger); }
 
-button.ghost {
-  background: #e7edfc;
-  color: #1f3e89;
-}
-
-.hint {
-  color: var(--muted);
-  font-size: 0.92rem;
-  line-height: 1.4;
-}
+.hint { color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -101,31 +79,9 @@ button.ghost {
   background: #fbfcff;
 }
 
-.stat h3 {
-  margin: 0 0 8px;
-  font-size: 0.95rem;
-  color: var(--muted);
-}
+.stat h3 { margin: 0 0 8px; font-size: 0.9rem; color: var(--muted); }
+.stat p { margin: 0; font-size: 1.05rem; font-weight: 700; }
 
-.stat p {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  padding: 10px;
-}
-
-.empty {
-  text-align: center;
-  color: var(--muted);
-}
+table { width: 100%; border-collapse: collapse; }
+th, td { border-bottom: 1px solid var(--border); text-align: left; padding: 10px; vertical-align: top; }
+.empty { text-align: center; color: var(--muted); }
