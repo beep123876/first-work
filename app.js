@@ -334,18 +334,39 @@ function loadSavedState() {
   }
 }
 
-async function fetchWorkbookBuffer(downloadUrl) {
-  const targets = [
-    downloadUrl,
-    `https://cors.isomorphic-git.org/${downloadUrl}`,
-    `https://corsproxy.io/?${encodeURIComponent(downloadUrl)}`,
+async function fetchWithTimeout(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function buildFetchTargets(downloadUrl) {
+  const noProto = downloadUrl.replace(/^https?:\/\//, "");
+  return [
+    { label: "direct", url: downloadUrl },
+    { label: "cors.isomorphic", url: `https://cors.isomorphic-git.org/${downloadUrl}` },
+    { label: "corsproxy", url: `https://corsproxy.io/?${encodeURIComponent(downloadUrl)}` },
+    { label: "allorigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(downloadUrl)}` },
+    { label: "jina", url: `https://r.jina.ai/http://${noProto}` },
   ];
+}
+
+async function fetchWorkbookBuffer(downloadUrl) {
+  const targets = buildFetchTargets(downloadUrl);
 
   let lastError = null;
-  for (const url of targets) {
+  for (const target of targets) {
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const response = await fetchWithTimeout(target.url);
+      if (!response.ok) throw new Error(`${target.label}: HTTP ${response.status}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) {
+        throw new Error(`${target.label}: HTML 응답(다운로드 링크/권한 확인 필요)`);
+      }
       return await response.arrayBuffer();
     } catch (error) {
       lastError = error;
