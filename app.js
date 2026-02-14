@@ -1,5 +1,5 @@
 const STORAGE_KEY = "attendanceDashboardData_v3";
-const DRIVE_URL_KEY = "attendanceDashboardDriveUrl_v1";
+const DEFAULT_DRIVE_XLSX_URL = "https://docs.google.com/spreadsheets/d/1grIcwPHx4XanTASz9UGmANC8L6bNAIMdH5D2h6wP73Q/export?format=xlsx";
 const HOURS_PER_DAY = 8;
 
 const state = {
@@ -8,9 +8,7 @@ const state = {
   months: [],
 };
 
-const driveUrlInput = document.getElementById("driveUrl");
 const loadDriveBtn = document.getElementById("loadDriveBtn");
-const saveUrlBtn = document.getElementById("saveUrlBtn");
 const clearBtn = document.getElementById("clearBtn");
 const monthSelect = document.getElementById("monthSelect");
 const employeeSelect = document.getElementById("employeeSelect");
@@ -316,8 +314,6 @@ function saveState() {
 
 function loadSavedState() {
   const raw = localStorage.getItem(STORAGE_KEY);
-  const savedUrl = localStorage.getItem(DRIVE_URL_KEY);
-  if (savedUrl) driveUrlInput.value = savedUrl;
   if (!raw) return;
 
   try {
@@ -333,20 +329,13 @@ function loadSavedState() {
 }
 
 async function loadFromDrive() {
-  const sourceUrl = driveUrlInput.value.trim();
-  if (!sourceUrl) {
-    alert("구글드라이브 링크를 입력하세요.");
-    return;
-  }
-
-  const downloadUrl = convertDriveUrl(sourceUrl);
+  const downloadUrl = convertDriveUrl(DEFAULT_DRIVE_XLSX_URL);
   const response = await fetch(downloadUrl);
   if (!response.ok) throw new Error(`다운로드 실패: ${response.status}`);
 
   const buffer = await response.arrayBuffer();
   parseWorkbook(buffer);
   saveState();
-  localStorage.setItem(DRIVE_URL_KEY, sourceUrl);
   populateMonths();
   monthSelect.value = sortMonths(state.months)[0] || "";
   populateEmployees();
@@ -362,18 +351,11 @@ loadDriveBtn.addEventListener("click", async () => {
   }
 });
 
-saveUrlBtn.addEventListener("click", () => {
-  localStorage.setItem(DRIVE_URL_KEY, driveUrlInput.value.trim());
-  alert("구글드라이브 링크를 저장했습니다.");
-});
-
 clearBtn.addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(DRIVE_URL_KEY);
   state.records = [];
   state.months = [];
   state.employeesByMonth.clear();
-  driveUrlInput.value = "";
   populateMonths();
   populateEmployees();
   updateDashboard();
@@ -389,3 +371,9 @@ employeeSelect.addEventListener("change", updateDashboard);
 loadSavedState();
 populateEmployees();
 updateDashboard();
+
+if (!state.records.length) {
+  loadFromDrive().catch((error) => {
+    alert(`초기 데이터 로딩에 실패했습니다. 관리자에게 문의하세요.\n${error.message}`);
+  });
+}
