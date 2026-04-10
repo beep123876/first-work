@@ -160,6 +160,7 @@ function classifyLeaveType(typeRaw, durationHours) {
     return { category: "연차", subType: durationHours > 0 ? `연차(${formatDurationText(durationHours)})` : "연차", isDayOff: true };
   }
   if (type.includes("휴무") || type.includes("휴가")) {
+  if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
     return { category: "휴무", subType: durationHours > 0 ? `휴무(${formatDurationText(durationHours)})` : "휴무", isDayOff: true };
   }
   return { category: "기타", subType: typeRaw };
@@ -286,6 +287,7 @@ function parseWorkbook(arrayBuffer) {
   const allRecords = [];
   workbook.SheetNames.forEach((sheetName) => {
     const rows = readSheetRows(workbook.Sheets[sheetName]);
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
     rows.forEach((row) => allRecords.push(...parseRow(row, sheetName)));
   });
 
