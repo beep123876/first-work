@@ -86,8 +86,3 @@ table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--border); text-align: center; padding: 10px; vertical-align: middle; }
 .empty { text-align: center; color: var(--muted); }
 
-.team-summary h2 { margin-top: 0; }
-.team-table td:first-child, .team-table th:first-child {
-  text-align: left;
-  padding-left: 14px;
-}
