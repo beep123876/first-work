@@ -674,12 +674,16 @@ function loadSavedState() {
   state.departments = [];
 }
 
+async function fetchWithTimeout(url, timeoutMs = 12000) {
 async function fetchWithTimeout(url, timeoutMs = 12000, useCredentials = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
       signal: controller.signal,
+      credentials: "omit",
+      cache: "no-store",
+    });
       credentials: useCredentials ? "include" : "omit",
       cache: "no-store",
     });
@@ -697,6 +701,9 @@ function buildFetchTargets(downloadUrl) {
   const sheetId = downloadUrl.match(/\/d\/([^/]+)/)?.[1] || "";
   const noProto = downloadUrl.replace(/^https?:\/\//, "");
   return [
+    { label: "google-export", url: downloadUrl },
+    { label: "google-export-authuser", url: `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}authuser=0` },
+    { label: "google-alt", url: sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx` : downloadUrl },
     { label: "google-export", url: downloadUrl, useCredentials: true },
     { label: "google-export-authuser", url: `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}authuser=0`, useCredentials: true },
     { label: "google-alt", url: sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx` : downloadUrl, useCredentials: true },
@@ -719,6 +726,10 @@ async function fetchWorkbookBuffer(downloadUrl) {
   let lastError = null;
   for (const target of targets) {
     try {
+      const response = await fetchWithTimeout(target.url, 12000);
+      if (!response.ok) throw new Error(`${target.label}: HTTP ${response.status}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) throw new Error(`${target.label}: HTML 응답(로그인/공유권한 필요)`);
       const response = await fetchWithTimeout(target.url, 12000, target.useCredentials);
       if (!response.ok) throw new Error(`${target.label}: HTTP ${response.status}`);
       const contentType = response.headers.get("content-type") || "";
