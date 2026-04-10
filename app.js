@@ -286,6 +286,7 @@ function parseWorkbook(arrayBuffer) {
   const workbook = XLSX.read(arrayBuffer, { type: "array" });
   const allRecords = [];
   workbook.SheetNames.forEach((sheetName) => {
+    const rows = readSheetRows(workbook.Sheets[sheetName]);
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
     rows.forEach((row) => allRecords.push(...parseRow(row, sheetName)));
   });
@@ -300,6 +301,32 @@ function parseWorkbook(arrayBuffer) {
 
   const departments = [...new Set(deduped.map((r) => r.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
   return { records: deduped, months: workbook.SheetNames.slice(), departments };
+}
+
+function normalizeHeaderCell(value) {
+  return String(value ?? "").replace(/\s+/g, "").trim();
+}
+
+function findHeaderRowIndex(sheet) {
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: false });
+  const headerKeywords = ["성명", "이름", "날짜", "일자", "부서", "소속", "팀", "휴가관리", "시간외관리", "출장관리", "조퇴"];
+  const scanLimit = Math.min(rows.length, 30);
+
+  for (let i = 0; i < scanLimit; i += 1) {
+    const normalized = (rows[i] || []).map(normalizeHeaderCell).filter(Boolean);
+    if (!normalized.length) continue;
+    const matchedCount = headerKeywords.reduce((count, key) => (normalized.includes(key) ? count + 1 : count), 0);
+    if (matchedCount >= 2 && (normalized.includes("성명") || normalized.includes("이름"))) return i;
+  }
+  return 0;
+}
+
+function readSheetRows(sheet) {
+  const headerRowIndex = findHeaderRowIndex(sheet);
+  return XLSX.utils.sheet_to_json(sheet, {
+    defval: "",
+    range: headerRowIndex,
+  });
 }
 
 function applyParsedData(parsed) {
