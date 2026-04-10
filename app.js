@@ -29,6 +29,8 @@ const ALLOWED_DEPT_NORMALIZED = ALLOWED_DEPARTMENTS ? ALLOWED_DEPARTMENTS.map(no
 const state = {
   records: [],
   employeesByDeptMonth: new Map(),
+  recordsByDeptMonth: new Map(),
+  recordsByDeptMonthName: new Map(),
   months: [],
   departments: [],
 };
@@ -36,6 +38,8 @@ const state = {
 const loadDriveBtn = document.getElementById("loadDriveBtn");
 const clearBtn = document.getElementById("clearBtn");
 const printBtn = document.getElementById("printBtn");
+const localFileBtn = document.getElementById("localFileBtn");
+const fileInput = document.getElementById("fileInput");
 const departmentSelect = document.getElementById("departmentSelect");
 const monthSelect = document.getElementById("monthSelect");
 const employeeSelect = document.getElementById("employeeSelect");
@@ -338,12 +342,21 @@ function applyParsedData(parsed) {
 
 function rebuildEmployeeMap() {
   state.employeesByDeptMonth = new Map();
+  state.recordsByDeptMonth = new Map();
+  state.recordsByDeptMonthName = new Map();
   state.records.forEach((r) => {
     if (!state.employeesByDeptMonth.has(r.department)) state.employeesByDeptMonth.set(r.department, new Map());
     const monthMapAll = state.employeesByDeptMonth.get(r.department);
     if (!monthMapAll.has(r.month)) monthMapAll.set(r.month, new Map());
     const employeeMap = monthMapAll.get(r.month);
     if (!employeeMap.has(r.name)) employeeMap.set(r.name, r.employeeId);
+
+    const deptMonthKey = `${r.department}__${r.month}`;
+    const deptMonthNameKey = `${r.department}__${r.month}__${r.name}`;
+    if (!state.recordsByDeptMonth.has(deptMonthKey)) state.recordsByDeptMonth.set(deptMonthKey, []);
+    state.recordsByDeptMonth.get(deptMonthKey).push(r);
+    if (!state.recordsByDeptMonthName.has(deptMonthNameKey)) state.recordsByDeptMonthName.set(deptMonthNameKey, []);
+    state.recordsByDeptMonthName.get(deptMonthNameKey).push(r);
   });
 }
 
@@ -424,12 +437,14 @@ function getSelectedRecords() {
   const month = monthSelect.value;
   const name = employeeSelect.value;
   if (!dept || !month || !name) return [];
+  return state.recordsByDeptMonthName.get(`${dept}__${month}__${name}`) || [];
   return state.records.filter((r) => r.department === dept && r.month === month && r.name === name);
 }
 
 function buildSummary(records) {
   const summary = summaryBase();
   records.forEach((r) => {
+    applyRecordToSummary(summary, r);
     if (r.category === "시간외") summary.overtime += r.overtimeHours;
     if (r.category === "연차") {
       summary.annualLeaveHours += r.durationHours;
@@ -455,6 +470,30 @@ function buildSummary(records) {
   return summary;
 }
 
+function applyRecordToSummary(summary, r) {
+  if (r.category === "시간외") summary.overtime += r.overtimeHours;
+  if (r.category === "연차") {
+    summary.annualLeaveHours += r.durationHours;
+    summary.dayOffHours += r.durationHours;
+  }
+  if (r.category === "대휴") {
+    summary.compOffHours += r.durationHours;
+    summary.dayOffHours += r.durationHours;
+  }
+  if (r.category === "휴무") summary.dayOffHours += r.durationHours;
+  if (r.category === "병가") summary.sickLeaveHours += r.durationHours;
+  if (r.category === "조퇴") summary.earlyLeaveHours += r.durationHours;
+  if (r.category === "산전후휴가") summary.maternityLeaveHours += r.durationHours;
+  if (r.category === "임산부정기검진") summary.pregnancyCheckupHours += r.durationHours;
+  if (r.category === "근속휴가") summary.longServiceLeaveHours += r.durationHours;
+  if (r.category === "포상휴가") summary.rewardLeaveHours += r.durationHours;
+  if (r.category === "임신기단축") summary.pregnancyShorterHours += r.durationHours;
+
+  if (r.tripType === "관내출장") summary.localTrip += 1;
+  if (r.tripType === "관외출장") summary.outsideTrip += 1;
+  if (r.tripType === "국외출장") summary.internationalTrip += 1;
+}
+
 function formatMonthlyAnnual(monthlyHours, annualHours, mode = "duration") {
   if (mode === "overtime") return `${monthlyHours.toFixed(2)}시간 / ${annualHours.toFixed(2)}시간`;
   return `${formatDurationText(monthlyHours)} / ${formatDurationText(annualHours)}`;
@@ -474,6 +513,24 @@ function renderTeamSummary() {
   }
 
   const targetMonthOrder = getMonthOrderValue(month);
+  const monthRecords = state.recordsByDeptMonth.get(`${dept}__${month}`) || [];
+  const annualRecords = [];
+  sortMonths(state.months).forEach((m) => {
+    if (getMonthOrderValue(m) > targetMonthOrder) return;
+    annualRecords.push(...(state.recordsByDeptMonth.get(`${dept}__${m}`) || []));
+  });
+
+  const monthByName = new Map();
+  const annualByName = new Map();
+  monthRecords.forEach((r) => {
+    if (!monthByName.has(r.name)) monthByName.set(r.name, summaryBase());
+    applyRecordToSummary(monthByName.get(r.name), r);
+  });
+  annualRecords.forEach((r) => {
+    if (!annualByName.has(r.name)) annualByName.set(r.name, summaryBase());
+    applyRecordToSummary(annualByName.get(r.name), r);
+  });
+  const names = [...annualByName.keys()].sort((a, b) => a.localeCompare(b, "ko"));
   const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
   const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
   const names = [...new Set(annualRecords.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
@@ -484,6 +541,8 @@ function renderTeamSummary() {
   }
 
   const rows = names.map((name) => {
+    const monthSummary = monthByName.get(name) || summaryBase();
+    const annualSummary = annualByName.get(name) || summaryBase();
     const monthSummary = buildSummary(monthRecords.filter((r) => r.name === name));
     const annualSummary = buildSummary(annualRecords.filter((r) => r.name === name));
     return `
@@ -521,6 +580,12 @@ function renderTeamOverview() {
     return;
   }
   const targetMonthOrder = getMonthOrderValue(month);
+  const monthRecords = state.recordsByDeptMonth.get(`${dept}__${month}`) || [];
+  const annualRecords = [];
+  sortMonths(state.months).forEach((m) => {
+    if (getMonthOrderValue(m) > targetMonthOrder) return;
+    annualRecords.push(...(state.recordsByDeptMonth.get(`${dept}__${m}`) || []));
+  });
   const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
   const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
   const monthSummary = buildSummary(monthRecords);
@@ -682,6 +747,8 @@ clearBtn.addEventListener("click", () => {
   state.months = [];
   state.departments = [];
   state.employeesByDeptMonth.clear();
+  state.recordsByDeptMonth.clear();
+  state.recordsByDeptMonthName.clear();
   populateDepartments();
   populateMonths();
   populateEmployees();
@@ -691,6 +758,31 @@ clearBtn.addEventListener("click", () => {
 
 if (printBtn) {
   printBtn.addEventListener("click", () => window.print());
+}
+
+if (localFileBtn && fileInput) {
+  localFileBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsed = parseWorkbook(buffer);
+      if (!parsed.records.length) throw new Error("엑셀 파싱 0건");
+      applyParsedData(parsed);
+      saveState();
+      populateDepartments();
+      populateMonths();
+      monthSelect.value = sortMonths(state.months)[0] || "";
+      populateEmployees();
+      updateDashboard();
+      alert(`로컬 엑셀을 반영했습니다. 전체 ${state.records.length}건`);
+    } catch (error) {
+      alert(`로컬 파일 불러오기에 실패했습니다.\n상세 오류: ${error.message}`);
+    } finally {
+      fileInput.value = "";
+    }
+  });
 }
 
 departmentSelect.addEventListener("change", () => {
