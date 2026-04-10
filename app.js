@@ -674,6 +674,15 @@ function loadSavedState() {
   state.departments = [];
 }
 
+async function fetchWithTimeout(url, timeoutMs = 12000, useCredentials = false) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      credentials: useCredentials ? "include" : "omit",
+      cache: "no-store",
+    });
 async function fetchWithTimeout(url, timeoutMs = 12000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -685,6 +694,16 @@ async function fetchWithTimeout(url, timeoutMs = 12000) {
 }
 
 function buildFetchTargets(downloadUrl) {
+  const sheetId = downloadUrl.match(/\/d\/([^/]+)/)?.[1] || "";
+  const noProto = downloadUrl.replace(/^https?:\/\//, "");
+  return [
+    { label: "google-export", url: downloadUrl, useCredentials: true },
+    { label: "google-export-authuser", url: `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}authuser=0`, useCredentials: true },
+    { label: "google-alt", url: sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx` : downloadUrl, useCredentials: true },
+    { label: "cors.isomorphic", url: `https://cors.isomorphic-git.org/${downloadUrl}`, useCredentials: false },
+    { label: "corsproxy", url: `https://corsproxy.io/?${encodeURIComponent(downloadUrl)}`, useCredentials: false },
+    { label: "allorigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(downloadUrl)}`, useCredentials: false },
+    { label: "jina", url: `https://r.jina.ai/http://${noProto}`, useCredentials: false },
   const noProto = downloadUrl.replace(/^https?:\/\//, "");
   return [
     { label: "direct", url: downloadUrl },
@@ -700,6 +719,10 @@ async function fetchWorkbookBuffer(downloadUrl) {
   let lastError = null;
   for (const target of targets) {
     try {
+      const response = await fetchWithTimeout(target.url, 12000, target.useCredentials);
+      if (!response.ok) throw new Error(`${target.label}: HTTP ${response.status}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) throw new Error(`${target.label}: HTML 응답(로그인/공유권한 필요)`);
       const response = await fetchWithTimeout(target.url);
       if (!response.ok) throw new Error(`${target.label}: HTTP ${response.status}`);
       const contentType = response.headers.get("content-type") || "";
@@ -737,6 +760,7 @@ loadDriveBtn.addEventListener("click", async () => {
     await loadFromDrive();
     alert(`드라이브 파일을 반영했습니다. 전체 ${state.records.length}건`);
   } catch (error) {
+    alert(`불러오기에 실패했습니다.\n상세 오류: ${error.message}\n\n점검: 시트 공유를 '링크가 있는 모든 사용자(뷰어 이상)'로 설정하거나, 현재 브라우저에서 해당 구글 계정으로 로그인되어 있는지 확인해주세요.`);
     alert(`불러오기에 실패했습니다.\n상세 오류: ${error.message}`);
   }
 });
@@ -810,6 +834,7 @@ updateDashboard();
 
 if (!state.records.length) {
   loadFromDrive().catch((error) => {
+    alert(`초기 데이터 로딩에 실패했습니다.\n상세 오류: ${error.message}\n\n점검: 시트 공유를 '링크가 있는 모든 사용자(뷰어 이상)'로 설정하거나, 현재 브라우저에서 해당 구글 계정으로 로그인되어 있는지 확인해주세요.`);
     alert(`초기 데이터 로딩에 실패했습니다.\n상세 오류: ${error.message}`);
   });
 }
