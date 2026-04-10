@@ -35,6 +35,7 @@ const state = {
 
 const loadDriveBtn = document.getElementById("loadDriveBtn");
 const clearBtn = document.getElementById("clearBtn");
+const printBtn = document.getElementById("printBtn");
 const departmentSelect = document.getElementById("departmentSelect");
 const monthSelect = document.getElementById("monthSelect");
 const employeeSelect = document.getElementById("employeeSelect");
@@ -53,6 +54,10 @@ const longServiceLeaveEl = document.getElementById("longServiceLeave");
 const rewardLeaveEl = document.getElementById("rewardLeave");
 const pregnancyShorterEl = document.getElementById("pregnancyShorter");
 const detailRows = document.getElementById("detailRows");
+const teamRows = document.getElementById("teamRows");
+const teamDayOffEl = document.getElementById("teamDayOff");
+const teamSickLeaveEl = document.getElementById("teamSickLeave");
+const teamOvertimeEl = document.getElementById("teamOvertime");
 
 function convertDriveUrl(url) {
   const trimmed = url.trim();
@@ -148,6 +153,13 @@ function classifyLeaveType(typeRaw, durationHours) {
   if (type.includes("근속휴가")) return { category: "근속휴가", subType: "근속휴가" };
   if (type.includes("법인발전유공휴가") || type.includes("포상휴가") || type.includes("포상")) return { category: "포상휴가", subType: "포상휴가" };
   if (type.includes("조퇴")) return { category: "조퇴", subType: typeRaw };
+  if (type.includes("대체휴무")) {
+    return { category: "대휴", subType: durationHours > 0 ? `대체휴무(${formatDurationText(durationHours)})` : "대체휴무", isDayOff: true };
+  }
+  if (type.includes("연차")) {
+    return { category: "연차", subType: durationHours > 0 ? `연차(${formatDurationText(durationHours)})` : "연차", isDayOff: true };
+  }
+  if (type.includes("휴무") || type.includes("휴가")) {
   if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
     return { category: "휴무", subType: durationHours > 0 ? `휴무(${formatDurationText(durationHours)})` : "휴무", isDayOff: true };
   }
@@ -364,6 +376,8 @@ function populateEmployees() {
 function summaryBase() {
   return {
     overtime: 0,
+    annualLeaveHours: 0,
+    compOffHours: 0,
     dayOffHours: 0,
     sickLeaveHours: 0,
     earlyLeaveHours: 0,
@@ -390,6 +404,14 @@ function buildSummary(records) {
   const summary = summaryBase();
   records.forEach((r) => {
     if (r.category === "시간외") summary.overtime += r.overtimeHours;
+    if (r.category === "연차") {
+      summary.annualLeaveHours += r.durationHours;
+      summary.dayOffHours += r.durationHours;
+    }
+    if (r.category === "대휴") {
+      summary.compOffHours += r.durationHours;
+      summary.dayOffHours += r.durationHours;
+    }
     if (r.category === "휴무") summary.dayOffHours += r.durationHours;
     if (r.category === "병가") summary.sickLeaveHours += r.durationHours;
     if (r.category === "조퇴") summary.earlyLeaveHours += r.durationHours;
@@ -404,6 +426,82 @@ function buildSummary(records) {
     if (r.tripType === "국외출장") summary.internationalTrip += 1;
   });
   return summary;
+}
+
+function formatMonthlyAnnual(monthlyHours, annualHours, mode = "duration") {
+  if (mode === "overtime") return `${monthlyHours.toFixed(2)}시간 / ${annualHours.toFixed(2)}시간`;
+  return `${formatDurationText(monthlyHours)} / ${formatDurationText(annualHours)}`;
+}
+
+function getMonthOrderValue(monthName) {
+  return Number((String(monthName).match(/\d+/) || [999])[0]);
+}
+
+function renderTeamSummary() {
+  if (!teamRows) return;
+  const dept = departmentSelect.value;
+  const month = monthSelect.value;
+  if (!dept || !month) {
+    teamRows.innerHTML = '<tr><td colspan="4" class="empty">부서와 월을 선택하면 통합 데이터가 표시됩니다.</td></tr>';
+    return;
+  }
+
+  const targetMonthOrder = getMonthOrderValue(month);
+  const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
+  const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
+  const names = [...new Set(annualRecords.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+
+  if (!names.length) {
+    teamRows.innerHTML = '<tr><td colspan="4" class="empty">표시할 통합 데이터가 없습니다.</td></tr>';
+    return;
+  }
+
+  const rows = names.map((name) => {
+    const monthSummary = buildSummary(monthRecords.filter((r) => r.name === name));
+    const annualSummary = buildSummary(annualRecords.filter((r) => r.name === name));
+    return `
+      <tr>
+        <td>${name}</td>
+        <td>${formatMonthlyAnnual(monthSummary.dayOffHours, annualSummary.dayOffHours)}</td>
+        <td>${formatMonthlyAnnual(monthSummary.sickLeaveHours, annualSummary.sickLeaveHours)}</td>
+        <td>${formatMonthlyAnnual(monthSummary.overtime, annualSummary.overtime, "overtime")}</td>
+      </tr>
+    `;
+  });
+
+  const teamMonthSummary = buildSummary(monthRecords);
+  const teamAnnualSummary = buildSummary(annualRecords);
+  const totalRow = `
+    <tr class="team-total-row">
+      <td>팀 전체</td>
+      <td>${formatMonthlyAnnual(teamMonthSummary.dayOffHours, teamAnnualSummary.dayOffHours)}</td>
+      <td>${formatMonthlyAnnual(teamMonthSummary.sickLeaveHours, teamAnnualSummary.sickLeaveHours)}</td>
+      <td>${formatMonthlyAnnual(teamMonthSummary.overtime, teamAnnualSummary.overtime, "overtime")}</td>
+    </tr>
+  `;
+
+  teamRows.innerHTML = totalRow + rows.join("");
+}
+
+function renderTeamOverview() {
+  if (!teamDayOffEl || !teamSickLeaveEl || !teamOvertimeEl) return;
+  const dept = departmentSelect.value;
+  const month = monthSelect.value;
+  if (!dept || !month) {
+    teamDayOffEl.textContent = "0시간 / 0시간";
+    teamSickLeaveEl.textContent = "0시간 / 0시간";
+    teamOvertimeEl.textContent = "0.00시간 / 0.00시간";
+    return;
+  }
+  const targetMonthOrder = getMonthOrderValue(month);
+  const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
+  const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
+  const monthSummary = buildSummary(monthRecords);
+  const annualSummary = buildSummary(annualRecords);
+
+  teamDayOffEl.textContent = formatMonthlyAnnual(monthSummary.dayOffHours, annualSummary.dayOffHours);
+  teamSickLeaveEl.textContent = formatMonthlyAnnual(monthSummary.sickLeaveHours, annualSummary.sickLeaveHours);
+  teamOvertimeEl.textContent = formatMonthlyAnnual(monthSummary.overtime, annualSummary.overtime, "overtime");
 }
 
 function renderDetails(records) {
@@ -449,6 +547,8 @@ function updateDashboard() {
   if (rewardLeaveEl) rewardLeaveEl.textContent = formatDurationText(summary.rewardLeaveHours);
   if (pregnancyShorterEl) pregnancyShorterEl.textContent = formatDurationText(summary.pregnancyShorterHours);
 
+  renderTeamOverview();
+  renderTeamSummary();
   renderDetails(records);
 }
 
@@ -561,6 +661,10 @@ clearBtn.addEventListener("click", () => {
   updateDashboard();
   alert("저장된 데이터를 초기화했습니다.");
 });
+
+if (printBtn) {
+  printBtn.addEventListener("click", () => window.print());
+}
 
 departmentSelect.addEventListener("change", () => {
   populateEmployees();

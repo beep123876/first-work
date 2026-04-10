@@ -85,3 +85,22 @@ button.danger { background: #fee8e8; color: var(--danger); }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--border); text-align: center; padding: 10px; vertical-align: middle; }
 .empty { text-align: center; color: var(--muted); }
+
+.team-summary h2 { margin-top: 0; }
+.team-table td:first-child, .team-table th:first-child {
+  text-align: left;
+  padding-left: 14px;
+}
+.team-total-row td {
+  font-weight: 700;
+  background: #f4f7ff;
+}
+
+@media print {
+  body { background: #fff; }
+  .controls button,
+  .selectors,
+  .hint { display: none !important; }
+  .container { max-width: none; margin: 0; padding: 0; }
+  .card { box-shadow: none; page-break-inside: avoid; }
+}
