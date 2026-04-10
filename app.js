@@ -38,6 +38,8 @@ const state = {
 const loadDriveBtn = document.getElementById("loadDriveBtn");
 const clearBtn = document.getElementById("clearBtn");
 const printBtn = document.getElementById("printBtn");
+const localFileBtn = document.getElementById("localFileBtn");
+const fileInput = document.getElementById("fileInput");
 const departmentSelect = document.getElementById("departmentSelect");
 const monthSelect = document.getElementById("monthSelect");
 const employeeSelect = document.getElementById("employeeSelect");
@@ -162,6 +164,7 @@ function classifyLeaveType(typeRaw, durationHours) {
     return { category: "연차", subType: durationHours > 0 ? `연차(${formatDurationText(durationHours)})` : "연차", isDayOff: true };
   }
   if (type.includes("휴무") || type.includes("휴가")) {
+  if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
     return { category: "휴무", subType: durationHours > 0 ? `휴무(${formatDurationText(durationHours)})` : "휴무", isDayOff: true };
   }
   return { category: "기타", subType: typeRaw };
@@ -288,6 +291,7 @@ function parseWorkbook(arrayBuffer) {
   const allRecords = [];
   workbook.SheetNames.forEach((sheetName) => {
     const rows = readSheetRows(workbook.Sheets[sheetName]);
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
     rows.forEach((row) => allRecords.push(...parseRow(row, sheetName)));
   });
 
@@ -434,12 +438,34 @@ function getSelectedRecords() {
   const name = employeeSelect.value;
   if (!dept || !month || !name) return [];
   return state.recordsByDeptMonthName.get(`${dept}__${month}__${name}`) || [];
+  return state.records.filter((r) => r.department === dept && r.month === month && r.name === name);
 }
 
 function buildSummary(records) {
   const summary = summaryBase();
   records.forEach((r) => {
     applyRecordToSummary(summary, r);
+    if (r.category === "시간외") summary.overtime += r.overtimeHours;
+    if (r.category === "연차") {
+      summary.annualLeaveHours += r.durationHours;
+      summary.dayOffHours += r.durationHours;
+    }
+    if (r.category === "대휴") {
+      summary.compOffHours += r.durationHours;
+      summary.dayOffHours += r.durationHours;
+    }
+    if (r.category === "휴무") summary.dayOffHours += r.durationHours;
+    if (r.category === "병가") summary.sickLeaveHours += r.durationHours;
+    if (r.category === "조퇴") summary.earlyLeaveHours += r.durationHours;
+    if (r.category === "산전후휴가") summary.maternityLeaveHours += r.durationHours;
+    if (r.category === "임산부정기검진") summary.pregnancyCheckupHours += r.durationHours;
+    if (r.category === "근속휴가") summary.longServiceLeaveHours += r.durationHours;
+    if (r.category === "포상휴가") summary.rewardLeaveHours += r.durationHours;
+    if (r.category === "임신기단축") summary.pregnancyShorterHours += r.durationHours;
+
+    if (r.tripType === "관내출장") summary.localTrip += 1;
+    if (r.tripType === "관외출장") summary.outsideTrip += 1;
+    if (r.tripType === "국외출장") summary.internationalTrip += 1;
   });
   return summary;
 }
@@ -505,6 +531,9 @@ function renderTeamSummary() {
     applyRecordToSummary(annualByName.get(r.name), r);
   });
   const names = [...annualByName.keys()].sort((a, b) => a.localeCompare(b, "ko"));
+  const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
+  const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
+  const names = [...new Set(annualRecords.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
 
   if (!names.length) {
     teamRows.innerHTML = '<tr><td colspan="4" class="empty">표시할 통합 데이터가 없습니다.</td></tr>';
@@ -514,6 +543,8 @@ function renderTeamSummary() {
   const rows = names.map((name) => {
     const monthSummary = monthByName.get(name) || summaryBase();
     const annualSummary = annualByName.get(name) || summaryBase();
+    const monthSummary = buildSummary(monthRecords.filter((r) => r.name === name));
+    const annualSummary = buildSummary(annualRecords.filter((r) => r.name === name));
     return `
       <tr>
         <td>${name}</td>
@@ -555,6 +586,8 @@ function renderTeamOverview() {
     if (getMonthOrderValue(m) > targetMonthOrder) return;
     annualRecords.push(...(state.recordsByDeptMonth.get(`${dept}__${m}`) || []));
   });
+  const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
+  const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
   const monthSummary = buildSummary(monthRecords);
   const annualSummary = buildSummary(annualRecords);
 
@@ -650,6 +683,11 @@ async function fetchWithTimeout(url, timeoutMs = 12000, useCredentials = false) 
       credentials: useCredentials ? "include" : "omit",
       cache: "no-store",
     });
+async function fetchWithTimeout(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -666,6 +704,13 @@ function buildFetchTargets(downloadUrl) {
     { label: "corsproxy", url: `https://corsproxy.io/?${encodeURIComponent(downloadUrl)}`, useCredentials: false },
     { label: "allorigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(downloadUrl)}`, useCredentials: false },
     { label: "jina", url: `https://r.jina.ai/http://${noProto}`, useCredentials: false },
+  const noProto = downloadUrl.replace(/^https?:\/\//, "");
+  return [
+    { label: "direct", url: downloadUrl },
+    { label: "cors.isomorphic", url: `https://cors.isomorphic-git.org/${downloadUrl}` },
+    { label: "corsproxy", url: `https://corsproxy.io/?${encodeURIComponent(downloadUrl)}` },
+    { label: "allorigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(downloadUrl)}` },
+    { label: "jina", url: `https://r.jina.ai/http://${noProto}` },
   ];
 }
 
@@ -678,6 +723,10 @@ async function fetchWorkbookBuffer(downloadUrl) {
       if (!response.ok) throw new Error(`${target.label}: HTTP ${response.status}`);
       const contentType = response.headers.get("content-type") || "";
       if (contentType.includes("text/html")) throw new Error(`${target.label}: HTML 응답(로그인/공유권한 필요)`);
+      const response = await fetchWithTimeout(target.url);
+      if (!response.ok) throw new Error(`${target.label}: HTTP ${response.status}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) throw new Error(`${target.label}: HTML 응답(다운로드 링크/권한 확인 필요)`);
       return await response.arrayBuffer();
     } catch (error) {
       lastError = error;
@@ -712,6 +761,7 @@ loadDriveBtn.addEventListener("click", async () => {
     alert(`드라이브 파일을 반영했습니다. 전체 ${state.records.length}건`);
   } catch (error) {
     alert(`불러오기에 실패했습니다.\n상세 오류: ${error.message}\n\n점검: 시트 공유를 '링크가 있는 모든 사용자(뷰어 이상)'로 설정하거나, 현재 브라우저에서 해당 구글 계정으로 로그인되어 있는지 확인해주세요.`);
+    alert(`불러오기에 실패했습니다.\n상세 오류: ${error.message}`);
   }
 });
 
@@ -732,6 +782,31 @@ clearBtn.addEventListener("click", () => {
 
 if (printBtn) {
   printBtn.addEventListener("click", () => window.print());
+}
+
+if (localFileBtn && fileInput) {
+  localFileBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsed = parseWorkbook(buffer);
+      if (!parsed.records.length) throw new Error("엑셀 파싱 0건");
+      applyParsedData(parsed);
+      saveState();
+      populateDepartments();
+      populateMonths();
+      monthSelect.value = sortMonths(state.months)[0] || "";
+      populateEmployees();
+      updateDashboard();
+      alert(`로컬 엑셀을 반영했습니다. 전체 ${state.records.length}건`);
+    } catch (error) {
+      alert(`로컬 파일 불러오기에 실패했습니다.\n상세 오류: ${error.message}`);
+    } finally {
+      fileInput.value = "";
+    }
+  });
 }
 
 departmentSelect.addEventListener("change", () => {
@@ -760,5 +835,6 @@ updateDashboard();
 if (!state.records.length) {
   loadFromDrive().catch((error) => {
     alert(`초기 데이터 로딩에 실패했습니다.\n상세 오류: ${error.message}\n\n점검: 시트 공유를 '링크가 있는 모든 사용자(뷰어 이상)'로 설정하거나, 현재 브라우저에서 해당 구글 계정으로 로그인되어 있는지 확인해주세요.`);
+    alert(`초기 데이터 로딩에 실패했습니다.\n상세 오류: ${error.message}`);
   });
 }
