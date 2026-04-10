@@ -164,6 +164,7 @@ function classifyLeaveType(typeRaw, durationHours) {
     return { category: "연차", subType: durationHours > 0 ? `연차(${formatDurationText(durationHours)})` : "연차", isDayOff: true };
   }
   if (type.includes("휴무") || type.includes("휴가")) {
+  if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
     return { category: "휴무", subType: durationHours > 0 ? `휴무(${formatDurationText(durationHours)})` : "휴무", isDayOff: true };
   }
   return { category: "기타", subType: typeRaw };
@@ -290,6 +291,7 @@ function parseWorkbook(arrayBuffer) {
   const allRecords = [];
   workbook.SheetNames.forEach((sheetName) => {
     const rows = readSheetRows(workbook.Sheets[sheetName]);
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
     rows.forEach((row) => allRecords.push(...parseRow(row, sheetName)));
   });
 
@@ -436,12 +438,34 @@ function getSelectedRecords() {
   const name = employeeSelect.value;
   if (!dept || !month || !name) return [];
   return state.recordsByDeptMonthName.get(`${dept}__${month}__${name}`) || [];
+  return state.records.filter((r) => r.department === dept && r.month === month && r.name === name);
 }
 
 function buildSummary(records) {
   const summary = summaryBase();
   records.forEach((r) => {
     applyRecordToSummary(summary, r);
+    if (r.category === "시간외") summary.overtime += r.overtimeHours;
+    if (r.category === "연차") {
+      summary.annualLeaveHours += r.durationHours;
+      summary.dayOffHours += r.durationHours;
+    }
+    if (r.category === "대휴") {
+      summary.compOffHours += r.durationHours;
+      summary.dayOffHours += r.durationHours;
+    }
+    if (r.category === "휴무") summary.dayOffHours += r.durationHours;
+    if (r.category === "병가") summary.sickLeaveHours += r.durationHours;
+    if (r.category === "조퇴") summary.earlyLeaveHours += r.durationHours;
+    if (r.category === "산전후휴가") summary.maternityLeaveHours += r.durationHours;
+    if (r.category === "임산부정기검진") summary.pregnancyCheckupHours += r.durationHours;
+    if (r.category === "근속휴가") summary.longServiceLeaveHours += r.durationHours;
+    if (r.category === "포상휴가") summary.rewardLeaveHours += r.durationHours;
+    if (r.category === "임신기단축") summary.pregnancyShorterHours += r.durationHours;
+
+    if (r.tripType === "관내출장") summary.localTrip += 1;
+    if (r.tripType === "관외출장") summary.outsideTrip += 1;
+    if (r.tripType === "국외출장") summary.internationalTrip += 1;
   });
   return summary;
 }
@@ -507,6 +531,9 @@ function renderTeamSummary() {
     applyRecordToSummary(annualByName.get(r.name), r);
   });
   const names = [...annualByName.keys()].sort((a, b) => a.localeCompare(b, "ko"));
+  const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
+  const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
+  const names = [...new Set(annualRecords.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
 
   if (!names.length) {
     teamRows.innerHTML = '<tr><td colspan="4" class="empty">표시할 통합 데이터가 없습니다.</td></tr>';
@@ -516,6 +543,8 @@ function renderTeamSummary() {
   const rows = names.map((name) => {
     const monthSummary = monthByName.get(name) || summaryBase();
     const annualSummary = annualByName.get(name) || summaryBase();
+    const monthSummary = buildSummary(monthRecords.filter((r) => r.name === name));
+    const annualSummary = buildSummary(annualRecords.filter((r) => r.name === name));
     return `
       <tr>
         <td>${name}</td>
@@ -557,6 +586,8 @@ function renderTeamOverview() {
     if (getMonthOrderValue(m) > targetMonthOrder) return;
     annualRecords.push(...(state.recordsByDeptMonth.get(`${dept}__${m}`) || []));
   });
+  const monthRecords = state.records.filter((r) => r.department === dept && r.month === month);
+  const annualRecords = state.records.filter((r) => r.department === dept && getMonthOrderValue(r.month) <= targetMonthOrder);
   const monthSummary = buildSummary(monthRecords);
   const annualSummary = buildSummary(annualRecords);
 
