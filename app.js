@@ -148,7 +148,7 @@ function classifyLeaveType(typeRaw, durationHours) {
   if (type.includes("근속휴가")) return { category: "근속휴가", subType: "근속휴가" };
   if (type.includes("법인발전유공휴가") || type.includes("포상휴가") || type.includes("포상")) return { category: "포상휴가", subType: "포상휴가" };
   if (type.includes("조퇴")) return { category: "조퇴", subType: typeRaw };
-  if (type.includes("대체휴무") || type.includes("휴무") || type.includes("휴가")) {
+
     return { category: "휴무", subType: durationHours > 0 ? `휴무(${formatDurationText(durationHours)})` : "휴무", isDayOff: true };
   }
   return { category: "기타", subType: typeRaw };
@@ -364,6 +364,7 @@ function populateEmployees() {
 function summaryBase() {
   return {
     overtime: 0,
+
     dayOffHours: 0,
     sickLeaveHours: 0,
     earlyLeaveHours: 0,
@@ -390,6 +391,7 @@ function buildSummary(records) {
   const summary = summaryBase();
   records.forEach((r) => {
     if (r.category === "시간외") summary.overtime += r.overtimeHours;
+
     if (r.category === "휴무") summary.dayOffHours += r.durationHours;
     if (r.category === "병가") summary.sickLeaveHours += r.durationHours;
     if (r.category === "조퇴") summary.earlyLeaveHours += r.durationHours;
@@ -405,6 +407,7 @@ function buildSummary(records) {
   });
   return summary;
 }
+
 
 function renderDetails(records) {
   if (!records.length) {
@@ -448,6 +451,7 @@ function updateDashboard() {
   if (longServiceLeaveEl) longServiceLeaveEl.textContent = formatDurationText(summary.longServiceLeaveHours);
   if (rewardLeaveEl) rewardLeaveEl.textContent = formatDurationText(summary.rewardLeaveHours);
   if (pregnancyShorterEl) pregnancyShorterEl.textContent = formatDurationText(summary.pregnancyShorterHours);
+
 
   renderDetails(records);
 }

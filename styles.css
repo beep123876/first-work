@@ -85,3 +85,4 @@ button.danger { background: #fee8e8; color: var(--danger); }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--border); text-align: center; padding: 10px; vertical-align: middle; }
 .empty { text-align: center; color: var(--muted); }
+
