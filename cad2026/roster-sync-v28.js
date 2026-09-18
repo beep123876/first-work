@@ -17,7 +17,7 @@ function workingTime(p,date){
  return '근무일·시간 미제공';
 }
 function attention(p,date,phase){
- const notes=[];const record=identity(p);
+ const notes=p.confirmation_note?[p.confirmation_note]:[];const record=identity(p);
  if(p.id.startsWith('F')){
   const shifts=(record.shifts||[]).filter(s=>s.date===date);
   if(date==='2026-09-19'){
@@ -29,20 +29,19 @@ function attention(p,date,phase){
  }
  if(date==='2026-09-20'&&p.id==='F15')notes.push('14:00 투입 전 후방 통로 담당자 확인 필요');
  if(date==='2026-09-20'&&p.id==='A14')notes.push('34번은 19일 명단에만 있음: 반대편 요원 확인 필요');
- if(date==='2026-09-20'&&p.id==='F03')notes.push('수상자석 미운영: 해당 위치의 공연 지원 임무 확인 필요');
+ if(date==='2026-09-20'&&p.id==='F03'&&/수상자석/.test(p.location_label||''))notes.push('수상자석 미운영: 해당 위치의 공연 지원 임무 확인 필요');
  if(date==='2026-09-20'&&p.id.startsWith('S'))notes.push('시청 20일 근무시간 미기재');
  if(/^[AG]/.test(p.id))notes.push('업체 성명·근무시간 확인 필요');
- return notes.join(' / ');
+ return [...new Set(notes)].join(' / ');
 }
 function normalize(){
  const date=currentStaffDate();
  for(const phase of ['ceremony','concert'])for(const p of scene.staff_phases[phase]){
   p.location_label=renamed(p.location_label);p.role=renamed(p.role);
-  // S30 is the passage post beside the former joint booth, not an indoor command post.
-  if(p.id==='S30'&&source30){Object.assign(p,{u:source30.u,v:source30.v,group:source30.group,command_only:false,location_label:'B1 왼쪽 외곽 · 프레스 부스 옆',role:'프레스 부스와 B1 사이 보행 통로 확보·정지 관람객 이동 안내·천막 출입구 앞 적치 방지'});}
+  if(p.id==='S30'&&source30){Object.assign(p,{u:source30.u,v:source30.v,group:source30.group,command_only:false,location_label:'B1 왼쪽 외곽 · 프레스 옆',role:'프레스와 B1 사이 보행 통로 확보·통로 관람객 이동 안내·천막 출입구 앞 적치 방지'});}
   if(date==='2026-09-19'&&phase==='ceremony'&&p.id==='G02')p.role=p.role.replace(/S03/g,'G03');
   if(date==='2026-09-20'&&p.id==='S13')p.role=p.role.replace(/S20과 우측 접근 상황 공유/g,'인근 경호·안전요원과 우측 접근 상황 공유');
-  if(date==='2026-09-20'&&p.id==='A14')p.location_label='10번 천막–B3 연결 휀스 동측 끝';
+  if(date==='2026-09-20'&&p.id==='A14')p.location_label='10번 천막-B3 연결 휀스 동측 끝';
   p.working_time=workingTime(p,date);p.attendance_note=attention(p,date,phase);
  }
 }
