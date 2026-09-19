@@ -10,12 +10,13 @@
  const correction=new URL('./roster-v28-1.js?v=28.1-F22',root);
  const roster=new URL('./roster-sync-v28.js?v=28.1',root);
  const day20=new URL('./day20-mats.js?v=28.2',root);
+ const relocation=new URL('./day20-relocation.js?v=28.3',root);
  const title='2026 하남이성산성문화제 | 현장 배치도';
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),30000);
  try{
   const fetchText=async url=>{const r=await fetch(url,{cache:'no-store',credentials:'same-origin',signal:controller.signal});if(!r.ok||new URL(r.url).origin!==location.origin)throw new Error('배치도 읽기 오류 '+r.status);return r.text();};
-  let [html,patch,duty,sync,mats]=await Promise.all([fetchText(source),fetchText(revision),fetchText(correction),fetchText(roster),fetchText(day20)]);clearTimeout(timer);
-  if(!/<html[\s>]/i.test(html)||!/<script[\s>]/i.test(html)||!patch.includes('fieldRevision28')||!duty.includes('synchronizeFieldRoster')||!sync.includes('syncFieldRoster281')||!mats.includes('applySeptember20Mats'))throw new Error('배치도 형식 오류');
+  let [html,patch,duty,sync,mats,moves]=await Promise.all([fetchText(source),fetchText(revision),fetchText(correction),fetchText(roster),fetchText(day20),fetchText(relocation)]);clearTimeout(timer);
+  if(!/<html[\s>]/i.test(html)||!/<script[\s>]/i.test(html)||!patch.includes('fieldRevision28')||!duty.includes('synchronizeFieldRoster')||!sync.includes('syncFieldRoster281')||!mats.includes('applySeptember20Mats')||!moves.includes('applySeptember20Operations'))throw new Error('배치도 형식 오류');
   html=html.replace(/(["'])\/base\.jpg\1/g,(_m,q)=>q+map.pathname+q);
   html=html.replace(/<title>[\s\S]*?<\/title>/i,'<title>'+title+'</title>');
   html=html.replace(/<html([^>]*)>/i,'<html$1 data-field-compact="'+compact+'">');
@@ -31,7 +32,7 @@
     const label=$('phaseCount');if(label)label.textContent=String(label.textContent).replace(/재단\\s+(\\d+)/,(_m,n)=>'재단 '+(Number(n)+1));
    };
   })();`;
-  html=html.replace(/<\/body>/i,'<script>'+(patch+'\n'+duty+'\n'+countPatch+'\n'+mats+'\n'+sync).replace(/<\/script/gi,'<\\/script')+'</script></body>');
+  html=html.replace(/<\/body>/i,'<script>'+(patch+'\n'+duty+'\n'+countPatch+'\n'+mats+'\n'+sync+'\n'+moves).replace(/<\/script/gi,'<\\/script')+'</script></body>');
   document.open();document.write(html);document.close();
  }catch(error){clearTimeout(timer);const s=document.getElementById('load-status');if(s)s.textContent='배치도를 불러오지 못했습니다. 통신 상태를 확인한 뒤 새로고침해 주세요.';const r=document.getElementById('retry');if(r)r.hidden=false;console.error('배치도 불러오기 실패',error);}
 })();
