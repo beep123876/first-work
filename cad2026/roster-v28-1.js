@@ -47,3 +47,46 @@ applyStaffRoster=function(){
 window.__hcfRosterV281={version:'v28.1-roster',sourceRevision:'v28.0-field',unconfirmed:['시청 20일 4명 근무시간','업체 21개 번호의 실명·근무일·시간','03번 장희진 내빈·수상 지원 추가 지정 여부','20일 A14 반대편 지원 편성'],note:'근무일별 전체 배치와 17~18시 시상 배치를 구분. 실제 현장 투입 및 변경 승인 여부는 별도 확인.'};
 if(typeof rebuildOperationalWorld==='function')rebuildOperationalWorld();else applyStaffRoster();
 })();
+
+(function applyRequestedFoundationAssignments(){
+'use strict';
+if(window.__hcfFoundationAssignments)return;
+const clone=x=>JSON.parse(JSON.stringify(x));
+const identityList=scene.operation_roster.foundation;
+const registry=scene.staff_registry.foundation;
+const neighborIdentity=identityList.find(p=>p.post_id==='F12'||p.person_id==='F12');
+const neighbor=registry.find(p=>p.id==='F12');
+if(!neighbor||!neighborIdentity)throw new Error('한상일(F12) 기준 배치를 찾을 수 없습니다.');
+const assignment='한상일(F12) 옆 현장 운영 지원';
+const location='B3 오른쪽 통로 · 한상일(F12) 옆';
+const known=identityList.find(p=>p.name==='박경득');
+if(known&&known.person_id!=='F22')throw new Error('박경득 명단의 기존 번호를 확인해야 합니다.');
+const park=known||{order:22,person_id:'F22',post_id:'F22',name:'박경득',group:'지역문화그룹',grade:'부장',shift:'근무시간 미기재',shifts:[],mobile:false,duty_excluded:false,command_only:false,escort:false};
+Object.assign(park,{assignment,role:assignment,location_label:location,sunday_assignment:assignment,sunday_location:location});
+if(!known)identityList.push(park);
+let parkPost=registry.find(p=>p.id==='F22');
+if(!parkPost){parkPost=clone(neighbor);registry.push(parkPost);}
+Object.assign(parkPost,{id:'F22',person_id:'F22',name:'박경득',org:'하남문화재단',grade:'부장',role:assignment,assignment,location_label:location,remote:false,command_only:false,shirt_color:neighbor.shirt_color||'#dc8b38'});
+delete parkPost.confirmation_note;delete parkPost.sunday_post;
+// Program duties have no invented coordinates, dates, shifts, or attendance count.
+const program=scene.operation_roster.program_staff||[];
+for(const entry of [
+ {person_id:'PROGRAM-KIM-JINSEONG',name:'김진성',organization:'하남문화재단',grade:'',assignment:'버스투어 담당',location_label:'버스투어 운영 구역',work_date:'',working_time:'',map_post_id:null},
+ {person_id:'PROGRAM-CHOI-HYEONJU',name:'최현주',organization:'도시관광그룹',grade:'차장',assignment:'홍보 담당',location_label:'행사 홍보 업무 구역',work_date:'',working_time:'',map_post_id:null}
+]){const old=program.find(p=>p.name===entry.name);if(old){old.assignment=entry.assignment;old.location_label=entry.location_label;}else program.push(entry);}
+scene.operation_roster.program_staff=program;
+const previous=applyStaffRoster;
+applyStaffRoster=function(){
+ previous();
+ for(const key of ['ceremony','concert']){
+  const entries=scene.staff_phases[key];if(!Array.isArray(entries))continue;
+  const reference=entries.find(p=>p.id==='F12');
+  scene.staff_phases[key]=entries.filter(p=>p.id!=='F22');
+  if(!reference)continue;
+  const positioned={...clone(parkPost),u:reference.u+1.2,v:reference.v,role:assignment,assignment,location_label:location,working_time:'근무시간 미기재'};
+  scene.staff_phases[key].push(positioned);
+ }
+};
+window.__hcfFoundationAssignments={version:'2026-09-19-F22',post:'F22',neighbor:'F12',name:'박경득',programStaff:clone(program)};
+if(typeof rebuildOperationalWorld==='function')rebuildOperationalWorld();else applyStaffRoster();
+})();
